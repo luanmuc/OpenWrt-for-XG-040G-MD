@@ -1,2 +1,6 @@
 src-git packages https://github.com/openwrt/packages.git;master
 src-git luci https://github.com/openwrt/luci.git;master
+
+src-git kenzok8 https://github.com/kenzok8/openwrt-packages
+src-git kiddin9 https://github.com/kiddin9/openwrt-packages
+src-git lienol https://github.com/Lienol/openwrt-packages
