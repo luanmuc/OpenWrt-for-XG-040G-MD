@@ -134,7 +134,10 @@ jobs:
       - name: Copy configuration and defconfig
         run: |
           cp -fv "${CONFIG_FILE}" openwrt/.config
-          cd openwrt && make defconfig
+          cd openwrt
+          sed -i '/^CONFIG_LINUX_6_12=/d;/^CONFIG_LINUX_6_18=/d' .config
+          printf 'CONFIG_LINUX_6_18=y\n' >> .config
+          make defconfig
           [ -e .config ] && cp .config defconfig-final.config
 
       - name: Upload build config files
@@ -215,7 +218,7 @@ jobs:
           ----------------------
           设备型号: XG-040G-MD
           构建时间: $(date +"%Y-%m-%d %H:%M")
-          内核版本: 6.12.X
+          内核版本: 6.18.X
           源码仓库: $REPO_URL
           分支: $REPO_BRANCH
           EOF
