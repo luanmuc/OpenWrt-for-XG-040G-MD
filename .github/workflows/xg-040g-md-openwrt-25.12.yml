@@ -125,7 +125,7 @@ jobs:
           ./scripts/feeds update -a
           ./scripts/feeds install -a -f
 
-      - name: Install third-party packages (homeproxy, passwall)
+      - name: Install third-party packages
         working-directory: ./openwrt/package
         run: |
           chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
@@ -215,7 +215,7 @@ jobs:
         id: tag
         if: env.UPLOAD_RELEASE == 'true'
         run: |
-          echo "release_tag=$(date +"%Y.%m.%d-%H%M%S")" >> $GITHUB_OUTPUT
+          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
           cat <<EOF > release.txt
           🚀 OpenWrt firmware for XG-040G-MD (openwrt-25.12)
           ----------------------
