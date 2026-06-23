@@ -122,6 +122,9 @@ jobs:
       - name: Update & Install feeds
         working-directory: ./openwrt
         run: |
+          # 添加 iStore 软件商店 feed 源（官方标准方式）
+          echo >> feeds.conf.default
+          echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
           ./scripts/feeds update -a
           ./scripts/feeds install -a -f
 
@@ -140,7 +143,7 @@ jobs:
       - name: Copy configuration and defconfig
         run: |
           cp -fv "${CONFIG_FILE}" openwrt/.config
-          cd openwrt && make defconfig
+          cd openwrt && make defconfig CONFIG_USE_APK=y
           [ -e .config ] && cp .config defconfig-final.config
 
       - name: Upload build config files
