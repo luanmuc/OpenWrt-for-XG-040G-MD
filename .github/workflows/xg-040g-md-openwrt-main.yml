@@ -119,27 +119,65 @@ jobs:
           echo "ccache dir: $CCACHE_DIR"
           ccache -s
 
+
       - name: Update & Install feeds
-        working-directory: ./openwrt
         run: |
-          # 添加 iStore 软件商店 feed 源（官方标准方式）
+          cd openwrt
+
+          # 1. 添加 iStore 软件商店 feed 源（官方标准方式）
+          echo ""
+          echo "=== 步骤 1：添加 iStore feed 源 ==="
           echo >> feeds.conf.default
           echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
+
+          # 验证 1：确认 feed 已添加
+          echo ""
+          echo "=== 验证 1：检查 feeds.conf.default ==="
+          cat feeds.conf.default
+          grep -q "istore" feeds.conf.default && echo "✅ iStore feed 已成功添加" || { echo "❌ iStore feed 添加失败"; exit 1; }
+
+          # 2. 更新所有 feeds
+          echo ""
+          echo "=== 步骤 2：更新 feeds ==="
           ./scripts/feeds update -a
+
+          # 验证 2：确认 iStore feed 能识别到包
+          echo ""
+          echo "=== 验证 2：检查 iStore 包列表 ==="
+          ./scripts/feeds list -r istore
+          ./scripts/feeds list -r istore | grep -q "luci-app-store" && echo "✅ iStore 包能被识别" || { echo "❌ iStore 包无法识别"; exit 1; }
+
+          # 3. 安装所有 feeds 的包
+          echo ""
+          echo "=== 步骤 3：安装 feeds 包 ==="
           ./scripts/feeds install -a -f
 
+          # 验证 3：确认 iStore 包已安装到 package 目录
+          echo ""
+          echo "=== 验证 3：检查 iStore 包是否安装 ==="
+          ls -la package/feeds/istore/
+          [ -f package/feeds/istore/luci-app-store/Makefile ] && echo "✅ luci-app-store 安装成功" || { echo "❌ luci-app-store 安装失败"; exit 1; }
+          [ -f package/feeds/istore/luci-lib-taskd/Makefile ] && echo "✅ luci-lib-taskd 安装成功" || { echo "❌ luci-lib-taskd 安装失败"; exit 1; }
+          [ -f package/feeds/istore/taskd/Makefile ] && echo "✅ taskd 安装成功" || { echo "❌ taskd 安装失败"; exit 1; }
       - name: Install third-party packages
         working-directory: ./openwrt/package
         run: |
           chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
           bash $GITHUB_WORKSPACE/scripts/update-packages.sh
           
+
       - name: Copy configuration and defconfig
         run: |
           cp -fv "${CONFIG_FILE}" openwrt/.config
           cd openwrt && make defconfig CONFIG_USE_APK=y
-          [ -e .config ] && cp .config defconfig-final.config
 
+          # 验证 4：确认 defconfig 后 iStore 已开启
+          echo ""
+          echo "=== 验证 4：检查 defconfig 后 iStore 配置 ==="
+          grep "CONFIG_PACKAGE_luci-app-store" .config || echo "⚠️  未找到 luci-app-store 配置"
+          grep -q "CONFIG_PACKAGE_luci-app-store=y" .config && echo "✅ luci-app-store 已成功开启" || { echo "❌ luci-app-store 未开启"; exit 1; }
+
+          [ -e .config ] && cp .config defconfig-final.config
       - name: Upload build config files
         uses: actions/upload-artifact@v6
         with:
