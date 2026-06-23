@@ -119,6 +119,13 @@ jobs:
           echo "ccache dir: $CCACHE_DIR"
           ccache -s
 
+      - name: Add iStore feed
+        working-directory: ./openwrt
+        run: |
+          echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
+          echo "=== feeds.conf.default ==="
+          cat feeds.conf.default
+
       - name: Update & Install feeds
         working-directory: ./openwrt
         run: |
@@ -142,6 +149,26 @@ jobs:
           cp -fv "${CONFIG_FILE}" openwrt/.config
           cd openwrt && make defconfig
           [ -e .config ] && cp .config defconfig-final.config
+
+      - name: Verify iStore config
+        run: |
+          cd openwrt
+          echo "=== Checking iStore packages ==="
+          if grep -q "CONFIG_PACKAGE_luci-app-store=y" .config; then
+            echo "✅ luci-app-store is selected"
+          else
+            echo "❌ luci-app-store NOT selected"
+          fi
+          echo "=== iStore dependencies check ==="
+          for pkg in luci-lib-taskd curl tar; do
+            if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
+              echo "✅ ${pkg} is selected"
+            else
+              echo "⚠️  ${pkg} not found (may be auto-included as dependency)"
+            fi
+          done
+          echo "=== All store-related config ==="
+          grep -i "store\|taskd" .config || echo "(no store packages found)"
 
       - name: Upload build config files
         uses: actions/upload-artifact@v6
