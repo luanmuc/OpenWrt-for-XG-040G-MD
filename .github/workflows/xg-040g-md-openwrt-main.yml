@@ -119,12 +119,12 @@ jobs:
           echo "ccache dir: $CCACHE_DIR"
           ccache -s
 
-      - name: Add iStore feed
-        working-directory: ./openwrt
+      - name: Clone iStore to package
+        working-directory: ./openwrt/package
         run: |
-          echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
-          echo "=== feeds.conf.default ==="
-          cat feeds.conf.default
+          git clone --depth=1 https://github.com/linkease/istore.git istore
+          echo "=== iStore packages ==="
+          ls -la istore/luci/
 
       - name: Update & Install feeds
         working-directory: ./openwrt
