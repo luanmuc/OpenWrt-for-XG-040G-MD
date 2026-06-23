@@ -144,6 +144,35 @@ jobs:
           sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/'             feeds/packages/lang/rust/Makefile
           grep -n "download-ci-llvm" feeds/packages/lang/rust/Makefile
 
+      - name: Move iStore packages to official feed directories
+        working-directory: ./openwrt
+        run: |
+          echo "=== Moving iStore packages to official feed locations ==="
+          
+          # LuCI 应用 → 放到 luci feed 的 applications 目录
+          cp -r package/istore/luci/luci-app-store package/feeds/luci/applications/
+          echo "✅ luci-app-store → feeds/luci/applications/"
+          
+          # LuCI 库 → 放到 luci feed 的 libs 目录
+          cp -r package/istore/luci/luci-lib-taskd package/feeds/luci/libs/
+          cp -r package/istore/luci/luci-lib-xterm package/feeds/luci/libs/
+          echo "✅ luci-lib-taskd, luci-lib-xterm → feeds/luci/libs/"
+          
+          # 普通工具包 → 放到 packages feed 的 utils 目录
+          cp -r package/istore/luci/taskd package/feeds/packages/utils/
+          echo "✅ taskd → feeds/packages/utils/"
+          
+          # 删除原来的 istore 目录，避免重复
+          rm -rf package/istore
+          echo "✅ Removed original package/istore directory"
+          
+          # 验证一下
+          echo ""
+          echo "=== Verification ==="
+          ls -la package/feeds/luci/applications/luci-app-store/Makefile
+          ls -la package/feeds/luci/libs/luci-lib-taskd/Makefile
+          ls -la package/feeds/packages/utils/taskd/Makefile
+
       - name: Copy configuration and defconfig
         run: |
           cp -fv "${CONFIG_FILE}" openwrt/.config
