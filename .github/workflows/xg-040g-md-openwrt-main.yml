@@ -132,7 +132,7 @@ jobs:
 
           # 验证 1：确认 feed 已添加
           echo ""
-          echo "=== 验证 1/7：检查 feeds.conf.default ==="
+          echo "=== 验证 1/8：检查 feeds.conf.default ==="
           cat feeds.conf.default
           if grep -q "istore" feeds.conf.default; then
             echo "✅ iStore feed 已成功添加"
@@ -149,7 +149,7 @@ jobs:
 
           # 验证 2：确认 iStore feed 能识别到包
           echo ""
-          echo "=== 验证 2/7：检查 iStore 包列表 ==="
+          echo "=== 验证 2/8：检查 iStore 包列表 ==="
           ./scripts/feeds list -r istore
           if ./scripts/feeds list -r istore | grep -q "luci-app-store"; then
             echo "✅ iStore 包能被识别"
@@ -166,7 +166,7 @@ jobs:
 
           # 验证 3：确认 iStore 包已安装到 package 目录
           echo ""
-          echo "=== 验证 3/7：检查 iStore 包是否安装 ==="
+          echo "=== 验证 3/8：检查 iStore 包是否安装 ==="
           ls -la package/feeds/istore/
           FAIL=0
           for pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
@@ -181,6 +181,35 @@ jobs:
             echo "诊断：部分包未正确安装，检查 feed 结构是否完整"
             exit 1
           fi
+
+          # 4. 修复 iStore 的条件依赖 bug（强制使用 apk + luci-compat）
+          echo ""
+          echo "=== 步骤 4：修复 iStore 条件依赖兼容性 bug ==="
+          echo "原始依赖行："
+          grep "LUCI_DEPENDS+=" package/feeds/istore/luci-app-store/Makefile | grep -i "opkg\|apk"
+          echo ""
+          echo "修复中..."
+          sed -i '/LUCI_DEPENDS+=.*opkg/c\LUCI_DEPENDS+=+apk +luci-compat' package/feeds/istore/luci-app-store/Makefile
+          echo ""
+          echo "修复后依赖行："
+          grep "LUCI_DEPENDS+=" package/feeds/istore/luci-app-store/Makefile | grep -i "apk\|compat"
+
+          # 验证 4：确认修复成功
+          echo ""
+          echo "=== 验证 4/8：确认条件依赖已修复 ==="
+          if grep -q "LUCI_DEPENDS+=+apk +luci-compat" package/feeds/istore/luci-app-store/Makefile; then
+            echo "✅ 条件依赖已成功修复为 apk + luci-compat"
+          else
+            echo "❌ 修复失败"
+            echo "诊断：检查 sed 命令是否正确执行"
+            exit 1
+          fi
+          # 确认没有 opkg 依赖了
+          if grep -q "opkg" package/feeds/istore/luci-app-store/Makefile; then
+            echo "⚠️  警告：Makefile 里还有 opkg 相关内容"
+          else
+            echo "✅ 已移除 opkg 依赖"
+          fi
       - name: Install third-party packages
         working-directory: ./openwrt/package
         run: |
@@ -193,9 +222,9 @@ jobs:
           cp -fv "${CONFIG_FILE}" openwrt/.config
           cd openwrt
 
-          # 验证 4：确认 iStore 包没被第三方脚本删掉
+          # 验证 5：确认 iStore 包没被第三方脚本删掉（且修复还在）
           echo ""
-          echo "=== 验证 4/7：defconfig 前检查 iStore 包是否还在 ==="
+          echo "=== 验证 5/8：defconfig 前检查 iStore 包 ==="
           if [ -f package/feeds/istore/luci-app-store/Makefile ]; then
             echo "✅ iStore 包完好，未被删除"
           else
@@ -203,28 +232,22 @@ jobs:
             echo "诊断：可能是 update-packages.sh 脚本删掉了"
             exit 1
           fi
-
-          # 诊断：检查 luci-app-store 的实际依赖（确认条件判断是否生效）
-          echo ""
-          echo "=== 诊断：检查 luci-app-store 的实际依赖 ==="
-          echo "当前 CONFIG_USE_APK 环境变量：${CONFIG_USE_APK:-未设置}"
-          echo ""
-          echo "用 DUMP=1 查看包信息："
-          make -C package/feeds/istore/luci-app-store DUMP=1 2>&1 | grep -E "PKG_NAME|DEPENDS|TITLE" || echo "⚠️  DUMP=1 执行失败"
-          echo ""
-          echo "=============================="
-
-          # 三重保险确保 CONFIG_USE_APK 生效
-          export CONFIG_USE_APK=y
+          # 确认修复还在
+          if grep -q "LUCI_DEPENDS+=+apk +luci-compat" package/feeds/istore/luci-app-store/Makefile; then
+            echo "✅ 条件依赖修复仍然有效"
+          else
+            echo "❌ 修复丢失了"
+            exit 1
+          fi
 
           # 执行 defconfig
           echo ""
           echo "=== 执行 make defconfig ==="
-          make defconfig CONFIG_USE_APK=y
+          make defconfig
 
-          # 验证 5：确认 defconfig 后 iStore 已开启
+          # 验证 6：确认 defconfig 后 iStore 已开启
           echo ""
-          echo "=== 验证 5/7：检查 defconfig 后 iStore 配置 ==="
+          echo "=== 验证 6/8：检查 defconfig 后 iStore 配置 ==="
           grep "CONFIG_PACKAGE_luci-app-store" .config || echo "⚠️  未找到 luci-app-store 配置"
           if grep -q "CONFIG_PACKAGE_luci-app-store=y" .config; then
             echo "✅ luci-app-store 已成功开启"
@@ -235,24 +258,21 @@ jobs:
             echo "1. 检查 iStore 包是否还存在："
             ls -la package/feeds/istore/luci-app-store/Makefile 2>/dev/null && echo "   ✅ 包存在" || echo "   ❌ 包不存在"
             echo ""
-            echo "2. 检查 CONFIG_USE_APK 配置："
-            grep CONFIG_USE_APK .config || echo "   ❌ 未找到 CONFIG_USE_APK 配置"
+            echo "2. 检查条件依赖修复是否还在："
+            grep "LUCI_DEPENDS+=" package/feeds/istore/luci-app-store/Makefile | head -3
             echo ""
-            echo "3. 检查是否依赖了 opkg（25.12 不应该有）："
-            grep CONFIG_PACKAGE_opkg .config && echo "   ⚠️  发现 opkg 配置" || echo "   ✅ 未发现 opkg 配置（正常）"
-            echo ""
-            echo "4. 检查 luci-lib-taskd 是否开启："
+            echo "3. 检查 luci-lib-taskd 是否开启："
             grep CONFIG_PACKAGE_luci-lib-taskd .config || echo "   未找到 luci-lib-taskd 配置"
             echo ""
-            echo "5. 检查 luci-compat 是否存在："
+            echo "4. 检查 luci-compat 是否存在："
             grep CONFIG_PACKAGE_luci-compat .config || echo "   未找到 luci-compat 配置"
             echo "=============================="
             exit 1
           fi
 
-          # 验证 6：确认关键依赖包和 CONFIG_USE_APK
+          # 验证 7：确认关键依赖包都开启了
           echo ""
-          echo "=== 验证 6/7：检查依赖包和 CONFIG_USE_APK ==="
+          echo "=== 验证 7/8：检查依赖包 ==="
           FAIL=0
           echo "--- 检查 iStore 依赖包 ---"
           for pkg in luci-lib-taskd taskd luci-compat apk curl tar libuci-lua mount-utils luci-lib-xterm; do
@@ -263,17 +283,9 @@ jobs:
               FAIL=1
             fi
           done
-          echo ""
-          echo "--- 检查 CONFIG_USE_APK ---"
-          if grep -q "CONFIG_USE_APK=y" .config; then
-            echo "✅ CONFIG_USE_APK=y 已生效"
-          else
-            echo "❌ CONFIG_USE_APK 未正确设置"
-            FAIL=1
-          fi
           if [ "$FAIL" -eq 1 ]; then
             echo ""
-            echo "❌ 部分依赖或配置未满足"
+            echo "❌ 部分依赖包未满足"
             exit 1
           fi
 
@@ -335,9 +347,9 @@ jobs:
         run: |
           cd openwrt
 
-          # 验证 7：确认编译生成了所有 iStore 相关包
+          # 验证 8：确认编译生成了所有 iStore 相关包
           echo ""
-          echo "=== 验证 7/7：检查编译结果 ==="
+          echo "=== 验证 8/8：检查编译结果 ==="
           echo "查找 iStore 相关安装包..."
           
           FAIL=0
