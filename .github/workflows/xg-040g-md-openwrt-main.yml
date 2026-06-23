@@ -119,13 +119,6 @@ jobs:
           echo "ccache dir: $CCACHE_DIR"
           ccache -s
 
-      - name: Clone iStore to package
-        working-directory: ./openwrt/package
-        run: |
-          git clone --depth=1 https://github.com/linkease/istore.git istore
-          echo "=== iStore packages ==="
-          ls -la istore/luci/
-
       - name: Update & Install feeds
         working-directory: ./openwrt
         run: |
@@ -138,74 +131,11 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
           bash $GITHUB_WORKSPACE/scripts/update-packages.sh
           
-      - name: Move iStore packages to official feed directories
-        working-directory: ./openwrt
-        run: |
-          echo "=== Moving iStore packages to official feed source directories ==="
-          
-          # 先看看 feeds 目录结构，调试用
-          echo "=== feeds/luci/ contents ==="
-          ls -la feeds/luci/
-          echo "=== feeds/packages/ contents ==="
-          ls -la feeds/packages/
-          
-          # LuCI 应用 → 放到 feeds/luci/applications/ 源码目录
-          cp -r package/istore/luci/luci-app-store feeds/luci/applications/
-          echo "✅ luci-app-store → feeds/luci/applications/"
-          
-          # LuCI 库 → 放到 feeds/luci/libs/ 源码目录
-          cp -r package/istore/luci/luci-lib-taskd feeds/luci/libs/
-          cp -r package/istore/luci/luci-lib-xterm feeds/luci/libs/
-          echo "✅ luci-lib-taskd, luci-lib-xterm → feeds/luci/libs/"
-          
-          # 普通工具包 → 放到 feeds/packages/utils/ 源码目录
-          cp -r package/istore/luci/taskd feeds/packages/utils/
-          echo "✅ taskd → feeds/packages/utils/"
-          
-          # 删除原来的 istore 目录，避免重复
-          rm -rf package/istore
-          echo "✅ Removed original package/istore directory"
-          
-          # 重新运行 feeds install，让新加入的包被正确链接到 package/feeds/
-          echo ""
-          echo "=== Re-installing feeds to pick up iStore packages ==="
-          ./scripts/feeds install -a -f
-          
-          # 验证一下
-          echo ""
-          echo "=== Verification ==="
-          echo "--- In feed source ---"
-          ls -la feeds/luci/applications/luci-app-store/Makefile
-          ls -la feeds/packages/utils/taskd/Makefile
-          echo "--- In package/feeds/ (symlinks) ---"
-          ls -la package/feeds/luci/applications/luci-app-store/Makefile
-          ls -la package/feeds/packages/utils/taskd/Makefile
-
       - name: Copy configuration and defconfig
         run: |
           cp -fv "${CONFIG_FILE}" openwrt/.config
           cd openwrt && make defconfig
           [ -e .config ] && cp .config defconfig-final.config
-
-      - name: Verify iStore config
-        run: |
-          cd openwrt
-          echo "=== Checking iStore packages ==="
-          if grep -q "CONFIG_PACKAGE_luci-app-store=y" .config; then
-            echo "✅ luci-app-store is selected"
-          else
-            echo "❌ luci-app-store NOT selected"
-          fi
-          echo "=== iStore dependencies check ==="
-          for pkg in luci-lib-taskd curl tar; do
-            if grep -q "CONFIG_PACKAGE_${pkg}=y" .config; then
-              echo "✅ ${pkg} is selected"
-            else
-              echo "⚠️  ${pkg} not found (may be auto-included as dependency)"
-            fi
-          done
-          echo "=== All store-related config ==="
-          grep -i "store\|taskd" .config || echo "(no store packages found)"
 
       - name: Upload build config files
         uses: actions/upload-artifact@v6
