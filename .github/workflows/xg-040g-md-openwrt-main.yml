@@ -242,13 +242,11 @@ jobs:
             echo ""
             echo "=== 执行 fallback：手动开启 iStore ==="
             # 手动添加 iStore 相关包的配置
-            cat >> .config << 'EOF'
-CONFIG_PACKAGE_luci-app-store=y
-CONFIG_PACKAGE_luci-lib-taskd=y
-CONFIG_PACKAGE_luci-lib-xterm=y
-CONFIG_PACKAGE_taskd=y
-CONFIG_PACKAGE_luci-compat=y
-EOF
+            echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
+            echo "CONFIG_PACKAGE_luci-lib-taskd=y" >> .config
+            echo "CONFIG_PACKAGE_luci-lib-xterm=y" >> .config
+            echo "CONFIG_PACKAGE_taskd=y" >> .config
+            echo "CONFIG_PACKAGE_luci-compat=y" >> .config
             echo "✅ Fallback 完成，iStore 已手动开启"
             echo "ISTORE_MODE=fallback" >> "$GITHUB_ENV"
           fi
