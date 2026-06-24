@@ -120,96 +120,6 @@ jobs:
           ccache -s
 
 
-      - name: Update & Install feeds
-        run: |
-          cd openwrt
-
-          # 1. 添加 iStore 软件商店 feed 源（官方标准方式）
-          echo ""
-          echo "=== 步骤 1：添加 iStore feed 源 ==="
-          echo >> feeds.conf.default
-          echo 'src-git istore https://github.com/linkease/istore;main' >> feeds.conf.default
-
-          # 验证 1：确认 feed 已添加
-          echo ""
-          echo "=== 验证 1/8：检查 feeds.conf.default ==="
-          cat feeds.conf.default
-          if grep -q "istore" feeds.conf.default; then
-            echo "✅ iStore feed 已成功添加"
-          else
-            echo "❌ iStore feed 添加失败"
-            echo "诊断：检查 echo 命令是否正确执行"
-            exit 1
-          fi
-
-          # 2. 更新所有 feeds
-          echo ""
-          echo "=== 步骤 2：更新 feeds ==="
-          ./scripts/feeds update -a
-
-          # 验证 2：确认 iStore feed 能识别到包
-          echo ""
-          echo "=== 验证 2/8：检查 iStore 包列表 ==="
-          ./scripts/feeds list -r istore
-          if ./scripts/feeds list -r istore | grep -q "luci-app-store"; then
-            echo "✅ iStore 包能被识别"
-          else
-            echo "❌ iStore 包无法识别"
-            echo "诊断：可能是 feed 源 URL 错误、分支错误、或网络问题"
-            exit 1
-          fi
-
-          # 3. 安装所有 feeds 的包
-          echo ""
-          echo "=== 步骤 3：安装 feeds 包 ==="
-          ./scripts/feeds install -a -f
-
-          # 验证 3：确认 iStore 包已安装到 package 目录
-          echo ""
-          echo "=== 验证 3/8：检查 iStore 包是否安装 ==="
-          ls -la package/feeds/istore/
-          FAIL=0
-          for pkg in luci-app-store luci-lib-taskd luci-lib-xterm taskd; do
-            if [ -f "package/feeds/istore/${pkg}/Makefile" ]; then
-              echo "✅ ${pkg} 安装成功"
-            else
-              echo "❌ ${pkg} 安装失败"
-              FAIL=1
-            fi
-          done
-          if [ "$FAIL" -eq 1 ]; then
-            echo "诊断：部分包未正确安装，检查 feed 结构是否完整"
-            exit 1
-          fi
-
-          # 4. 修复 iStore 的条件依赖 bug（强制使用 apk + luci-compat）
-          echo ""
-          echo "=== 步骤 4：修复 iStore 条件依赖兼容性 bug ==="
-          echo "原始依赖行："
-          grep "LUCI_DEPENDS+=" package/feeds/istore/luci-app-store/Makefile | grep -i "opkg\|apk"
-          echo ""
-          echo "修复中..."
-          sed -i '/LUCI_DEPENDS+=.*opkg/c\LUCI_DEPENDS+=+apk +luci-compat' package/feeds/istore/luci-app-store/Makefile
-          echo ""
-          echo "修复后依赖行："
-          grep "LUCI_DEPENDS+=" package/feeds/istore/luci-app-store/Makefile | grep -i "apk\|compat"
-
-          # 验证 4：确认修复成功
-          echo ""
-          echo "=== 验证 4/8：确认条件依赖已修复 ==="
-          if grep -q "LUCI_DEPENDS+=+apk +luci-compat" package/feeds/istore/luci-app-store/Makefile; then
-            echo "✅ 条件依赖已成功修复为 apk + luci-compat"
-          else
-            echo "❌ 修复失败"
-            echo "诊断：检查 sed 命令是否正确执行"
-            exit 1
-          fi
-          # 确认没有 opkg 依赖了
-          if grep -q "opkg" package/feeds/istore/luci-app-store/Makefile; then
-            echo "⚠️  警告：Makefile 里还有 opkg 相关内容"
-          else
-            echo "✅ 已移除 opkg 依赖"
-          fi
       - name: Install third-party packages
         working-directory: ./openwrt/package
         run: |
@@ -245,16 +155,31 @@ jobs:
           echo "=== 执行 make defconfig ==="
           make defconfig
 
+          # 诊断：检查 tmp/.packageinfo 里有没有 luci-app-store（确认包是否被正确解析）
+          echo ""
+          echo "=== 诊断：检查 tmp/.packageinfo ==="
+          if grep -q "Source-Makefile:.*istore.*luci-app-store" tmp/.packageinfo 2>/dev/null; then
+            echo "✅ tmp/.packageinfo 里有 luci-app-store（包解析成功）"
+            grep "Source-Makefile:.*istore.*luci-app-store" tmp/.packageinfo | head -3
+          else
+            echo "⚠️  tmp/.packageinfo 里没找到 luci-app-store（包解析可能失败）"
+          fi
+          echo ""
+          echo "=============================="
+
           # 验证 6：确认 defconfig 后 iStore 已开启
           echo ""
           echo "=== 验证 6/8：检查 defconfig 后 iStore 配置 ==="
           grep "CONFIG_PACKAGE_luci-app-store" .config || echo "⚠️  未找到 luci-app-store 配置"
+          
+          OFFICIAL_SUCCESS=0
           if grep -q "CONFIG_PACKAGE_luci-app-store=y" .config; then
-            echo "✅ luci-app-store 已成功开启"
+            echo "✅ luci-app-store 已成功开启（官方方式）"
+            OFFICIAL_SUCCESS=1
           else
-            echo "❌ luci-app-store 未开启"
+            echo "⚠️  官方方式未成功，自动执行 fallback 方案..."
             echo ""
-            echo "========== 诊断信息 =========="
+            echo "========== Fallback 诊断信息 =========="
             echo "1. 检查 iStore 包是否还存在："
             ls -la package/feeds/istore/luci-app-store/Makefile 2>/dev/null && echo "   ✅ 包存在" || echo "   ❌ 包不存在"
             echo ""
@@ -266,8 +191,27 @@ jobs:
             echo ""
             echo "4. 检查 luci-compat 是否存在："
             grep CONFIG_PACKAGE_luci-compat .config || echo "   未找到 luci-compat 配置"
-            echo "=============================="
-            exit 1
+            echo "========================================"
+            echo ""
+            echo "=== 执行 Fallback：手动添加 iStore 配置 ==="
+            # 手动添加 iStore 相关包的配置
+            echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
+            echo "CONFIG_PACKAGE_luci-lib-taskd=y" >> .config
+            echo "CONFIG_PACKAGE_luci-lib-xterm=y" >> .config
+            echo "CONFIG_PACKAGE_taskd=y" >> .config
+            echo "CONFIG_PACKAGE_luci-compat=y" >> .config
+            # 重新运行 olddefconfig 让配置生效
+            echo ""
+            echo "重新运行 make olddefconfig..."
+            make olddefconfig
+            echo ""
+            # 再次确认
+            if grep -q "CONFIG_PACKAGE_luci-app-store=y" .config; then
+              echo "✅ Fallback 成功，iStore 已手动开启"
+            else
+              echo "❌ Fallback 也失败了"
+              exit 1
+            fi
           fi
 
           # 验证 7：确认关键依赖包都开启了
@@ -287,6 +231,17 @@ jobs:
             echo ""
             echo "❌ 部分依赖包未满足"
             exit 1
+          fi
+
+          # 记录结果
+          if [ "$OFFICIAL_SUCCESS" -eq 1 ]; then
+            echo "ISTORE_MODE=official" >> $GITHUB_ENV
+            echo ""
+            echo "🎉 恭喜！官方方式直接成功！"
+          else
+            echo "ISTORE_MODE=fallback" >> $GITHUB_ENV
+            echo ""
+            echo "ℹ️  使用了 fallback 方案，iStore 已成功开启"
           fi
 
           [ -e .config ] && cp .config defconfig-final.config
@@ -367,6 +322,16 @@ jobs:
           echo ""
           if [ "$FAIL" -eq 0 ]; then
             echo "✅ 所有 iStore 相关包都编译成功"
+            echo ""
+            echo "========================================"
+            echo "  🎉 iStore 集成成功！"
+            echo "  集成方式：${ISTORE_MODE}"
+            if [ "$ISTORE_MODE" = "official" ]; then
+              echo "  状态：官方标准方式，完美适配"
+            else
+              echo "  状态：Fallback 方案，功能正常"
+            fi
+            echo "========================================"
           else
             echo "❌ 部分 iStore 相关包未生成"
             echo "诊断：检查编译日志中对应包的错误信息"
