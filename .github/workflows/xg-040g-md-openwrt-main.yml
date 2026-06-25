@@ -10,7 +10,7 @@ on:
       log_switch:
         description: "Build logs"
         required: false
-        default: false
+        default: true
         type: boolean
   push:
     branches:
@@ -366,15 +366,24 @@ jobs:
           echo "iStore 集成模式：${{ env.ISTORE_MODE }}"
           echo ""
           
+          # 先输出诊断信息
+          echo "=== 诊断信息 ==="
+          echo "bin 目录是否存在：$(ls -d bin 2>/dev/null && echo 是 || echo 否)"
+          echo "bin/packages 目录是否存在：$(ls -d bin/packages 2>/dev/null && echo 是 || echo 否)"
+          echo "bin 目录下 apk 文件总数：$(find bin -name "*.apk" 2>/dev/null | wc -l)"
+          echo "包含 luci 的 apk 文件数：$(find bin -name "*luci*apk" 2>/dev/null | wc -l)"
+          echo ""
+          
           packages=("luci-app-store" "luci-lib-taskd" "luci-lib-xterm" "taskd")
           success=0
           total=${#packages[@]}
           
           for pkg in "${packages[@]}"; do
-            # 搜索所有 apk 文件
-            count=$(find bin/packages -name "${pkg}_*.apk" 2>/dev/null | wc -l)
+            # 搜索整个 bin 目录，用更宽泛的 pattern
+            count=$(find bin -name "*${pkg}*.apk" 2>/dev/null | wc -l)
             if [ "$count" -gt 0 ]; then
               echo "  ✅ $pkg 编译成功（找到 $count 个包）"
+              find bin -name "*${pkg}*.apk" 2>/dev/null | head -3 | sed 's/^/    /'
               success=$((success + 1))
             else
               echo "  ❌ $pkg 未找到编译产物"
