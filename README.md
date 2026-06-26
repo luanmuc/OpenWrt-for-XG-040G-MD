@@ -1,25 +1,150 @@
 # OpenWrt for XG-040G-MD
-OpenWrt firmware for NOKIA BELL XG-040G-MD
-源仓库采用：[https://github.com/xiangtailiang/openwrt](https://github.com/xiangtailiang/openwrt)
-- 已完美适配 SkyHigh 闪存，运行稳定（采用官方 Robust Read Workaround 补丁）
-- Image 基于 OpenWrt 25.12 稳定版或 main (snapshot) 分支构建
-- 包含 luci，尽可能保持小体积，不包含其他不必要的包
-## 包含的插件 (LuCI Apps)
-固件主打核心路由功能，精简无杂项：
-- **基础界面**: LuCI (支持 HTTPS), 中文语言包
-- **默认主题**: Argon 主题 (含设置页), 保留原生 Bootstrap
-- **网络与安全**: 防火墙 (基于 nftables), dnsmasq (DHCP/DNS/IPv6)
-## 刷机教程
-1. **刷入 U-Boot**: [点击参考通用的 XG-040G-MD 刷机教程](https://nwrt.kuroneko.host/flashdocs/XG-040G-MD.html)
-2. **刷入系统**: 在 U-Boot Web 恢复界面中，上传并刷入本仓库 Release 页面发布的 **factory** 固件。
-> [!WARNING]
-> **进入 U-Boot 的正确方法：**
-> 给路由器通电等 **3秒钟** 后，再按住 reset 键不放。
-> **千万不要**按住 reset 键再通电，否则机器会进入底层的"救砖模式"（MaskROM/Emergency 模式），将无法进入 U-Boot Web 界面。
-## 运行截图
+
+OpenWrt 固件定制项目，专为 **NOKIA BELL XG-040G-MD** 路由器优化。
+
+基于 [xiangtailiang/openwrt](https://github.com/xiangtailiang/openwrt) 源码构建
+
+---
+
+## ✨ 特性
+
+- ✅ **完美适配 SkyHigh 闪存**：采用官方 Robust Read Workaround 补丁，运行稳定不掉线
+- 📦 **双分支构建**：同时提供 OpenWrt 25.12 稳定版和 main (snapshot) 开发版
+- 🎨 **Argon 主题**：默认启用美观的 Argon 主题，保留原生 Bootstrap 可切换
+- 🌐 **中文界面**：预装中文语言包，开箱即用
+- 🛒 **iStore 软件商店**：一键安装各种插件，扩展方便
+- 🚀 **PassWall2 科学上网**：轻量高效，支持自动更新订阅、节点测速、自动切换
+- 🔧 **实用工具集**：网页终端、文件管理、流量监控、SQM 流控等常用工具
+
+---
+
+## 📦 包含的插件 (LuCI Apps)
+
+### 基础界面
+- **LuCI** - Web 管理界面（支持 HTTPS）
+- **中文语言包** - 完整中文界面
+- **Argon 主题** - 现代化美观主题（含设置页）
+- **Bootstrap 主题** - 原生默认主题（保留可切换）
+
+### 科学上网
+- **PassWall2** - 轻量级科学上网插件
+  - 支持 VLESS / VMess / Trojan / Shadowsocks 等多种协议
+  - 支持节点订阅自动更新
+  - 支持节点测速与自动切换
+  - 内置 xray-core 核心
+  - 内置 v2ray-geosite / v2ray-geoip 分流规则数据库
+
+### 软件商店
+- **iStore** - 易有云软件商店
+  - 一键安装/卸载插件
+  - 丰富的第三方插件库
+  - 插件自动更新
+
+### 网络工具
+- **UPnP** - 通用即插即用（端口自动映射）
+- **SQM QoS** - 智能流量整形，缓解 Bufferbloat
+- **CrowdSec** - 分布式防火墙，自动拦截恶意 IP
+
+### 系统工具
+- **ttyd** - 网页终端，浏览器里直接用命令行
+- **文件传输** - 上传下载固件/配置文件
+- **文件管理器** - 可视化文件管理
+- **自定义命令** - 快捷执行常用命令
+- **irqbalance** - 中断均衡，优化多核性能
+- **darkstat** - 流量统计分析
+
+> 💡 **Docker 支持**：dockerman 插件已预置但默认禁用，需要的话可在 iStore 中开启。
+
+---
+
+## 🔨 构建说明
+
+本项目通过 GitHub Actions 自动构建，触发方式：
+
+- **25.12 分支**：推送到 main 分支或手动触发，基于 OpenWrt 25.12 稳定版构建
+- **main 分支**：推送到 main 分支或手动触发，基于 OpenWrt main (snapshot) 开发版构建
+- **夜间同步**：每天自动同步上游源码并构建（如有更新）
+
+构建产物在 Release 页面发布，包含：
+- `factory` 固件 - 用于首次从原厂系统刷入
+- `sysupgrade` 固件 - 用于 OpenWrt 系统内升级
+
+---
+
+## 📖 刷机教程
+
+### 准备工作
+1. 一台 XG-040G-MD 路由器
+2. 网线一根
+3. 电脑一台（设置静态 IP：192.168.1.x）
+
+### 刷入步骤
+
+1. **进入 U-Boot Web 恢复模式**
+   - 给路由器通电
+   - 等待 **3 秒钟**
+   - 按住 reset 键不放，直到网口灯闪烁
+   - 浏览器访问 `http://192.168.1.1`
+
+   > ⚠️ **注意**：千万不要按住 reset 再通电，否则会进入 MaskROM 救砖模式，无法进入 U-Boot Web 界面。
+
+2. **上传固件**
+   - 在 U-Boot Web 界面选择本仓库 Release 页面下载的 **factory** 固件
+   - 点击上传，等待刷写完成（约 3-5 分钟）
+   - 路由器自动重启后即可使用
+
+3. **初始配置**
+   - 默认管理地址：`http://192.168.1.1`
+   - 默认用户名：`root`
+   - 默认密码：无（首次登录请设置密码）
+
+---
+
+## 🚀 PassWall2 使用说明
+
+### 添加节点订阅
+1. 登录 LuCI 管理界面
+2. 进入 **服务 → PassWall2**
+3. 点击 **节点列表 → 节点订阅**
+4. 添加订阅链接，设置自动更新间隔
+5. 点击 **保存并应用**，然后点 **更新订阅**
+
+### 配置分流规则
+PassWall2 内置多种分流模式：
+- **绕过大陆** - 国内网站直连，国外走代理（推荐）
+- **全局代理** - 所有流量都走代理
+- **直连模式** - 所有流量都直连（关闭代理）
+
+也可以自定义分流规则，根据域名、IP、端口等灵活配置。
+
+---
+
+## 🛒 iStore 使用说明
+
+1. 登录 LuCI 管理界面
+2. 进入 **服务 → iStore**
+3. 浏览或搜索需要的插件
+4. 点击 **安装** 即可一键安装
+5. 已安装的插件可在 **已安装** 页面管理
+
+---
+
+## 🖼️ 运行截图
+
 ### 系统概览
 ![System Overview](shot/shot1.png)
+
 ### 接口与网络
 ![Interfaces](shot/shot2.png)
-## Docs
-- `docs/npu-firmware-load.md`: NPU 固件加载报错（`-2`）分析与修复记录
+
+---
+
+## 📚 文档
+
+- [NPU 固件加载问题分析](docs/npu-firmware-load.md) - NPU 固件加载报错（`-2`）分析与修复记录
+
+---
+
+## ⚠️ 免责声明
+
+本项目仅供学习研究使用，请遵守当地法律法规，请勿用于非法用途。使用本固件所产生的一切后果由使用者自行承担。
