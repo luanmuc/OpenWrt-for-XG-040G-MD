@@ -1,1 +1,31 @@
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+openwrt/
+build_dir/
+staging_dir/
+dl/
+bin/
+tmp/
+
+# Ccache
+.ccache/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
