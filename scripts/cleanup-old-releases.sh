@@ -1,17 +1,34 @@
 #!/usr/bin/env bash
+# Clean up old GitHub Releases
+# Keeps the newest N releases, the latest release, and releases marked with a keep marker
 
 set -euo pipefail
+
+# ==========================================
+# Configuration
+# ==========================================
 
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 
 keep_releases="${KEEP_RELEASES:-20}"
 keep_marker="${KEEP_RELEASE_MARKER:-[keep-release]}"
+dry_run="${DRY_RUN:-false}"
+
+# ==========================================
+# Validation
+# ==========================================
 
 if ! [[ "$keep_releases" =~ ^[0-9]+$ ]] || (( keep_releases < 1 )); then
-  echo "KEEP_RELEASES must be a positive integer, got: ${keep_releases}"
+  echo "ERROR: KEEP_RELEASES must be a positive integer, got: ${keep_releases}"
   exit 1
 fi
+
+# ==========================================
+# Fetch Releases
+# ==========================================
+
+echo "=== Fetching releases from ${GITHUB_REPOSITORY} ==="
 
 release_json="$(
   gh release list \
@@ -39,26 +56,82 @@ mapfile -t preserved_tags < <(
     ) | unique[]'
 )
 
+# ==========================================
+# Build Preserved Map
+# ==========================================
+
 declare -A preserved_map=()
 for tag in "${preserved_tags[@]}"; do
   preserved_map["$tag"]=1
 done
 
+# ==========================================
+# Summary
+# ==========================================
+
 release_count="${#release_tags[@]}"
-echo "Found ${release_count} published releases in ${GITHUB_REPOSITORY}."
-echo "Keeping the newest ${keep_releases} releases, the latest release, and releases marked with ${keep_marker}."
+preserved_count="${#preserved_tags[@]}"
+delete_count=$(( release_count - preserved_count ))
+
+echo ""
+echo "=== Summary ==="
+echo "Total published releases: ${release_count}"
+echo "Releases to keep: ${preserved_count}"
+echo "Releases to delete: ${delete_count}"
+echo ""
+echo "Keep policy:"
+echo "  - Newest ${keep_releases} releases"
+echo "  - The latest release"
+echo "  - Releases marked with '${keep_marker}'"
+
+if [[ "$dry_run" == "true" ]]; then
+  echo ""
+  echo "=== DRY RUN MODE - No actual deletions ==="
+fi
 
 if (( release_count <= keep_releases )); then
+  echo ""
   echo "No cleanup needed. Keeping all ${release_count} releases."
   exit 0
 fi
 
+# ==========================================
+# Cleanup
+# ==========================================
+
+echo ""
+echo "=== Processing releases ==="
+
+deleted=0
+preserved=0
+
 for tag in "${release_tags[@]}"; do
   if [[ -n "${preserved_map[$tag]:-}" ]]; then
-    echo "Preserving release: ${tag}"
+    echo "  [KEEP] ${tag}"
+    preserved=$(( preserved + 1 ))
     continue
   fi
 
-  echo "Deleting old release: ${tag}"
-  gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag -y
+  if [[ "$dry_run" == "true" ]]; then
+    echo "  [DELETE (dry-run)] ${tag}"
+  else
+    echo "  [DELETE] ${tag}"
+    gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag -y
+  fi
+  deleted=$(( deleted + 1 ))
 done
+
+# ==========================================
+# Final Summary
+# ==========================================
+
+echo ""
+echo "=== Cleanup Complete ==="
+echo "Preserved: ${preserved} releases"
+echo "Deleted: ${deleted} releases"
+
+if [[ "$dry_run" == "true" ]]; then
+  echo ""
+  echo "Note: This was a dry run. No releases were actually deleted."
+  echo "Set DRY_RUN=false to perform actual deletion."
+fi
