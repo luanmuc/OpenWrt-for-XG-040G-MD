@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       log_switch:
-        description: "Build logs"
+        description: "Build logs (enable = single thread with full log, disable = multi-thread fast build)"
         required: false
-        default: true
+        default: false
         type: boolean
   push:
     branches:
@@ -104,12 +104,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-dl-
 
+      - name: Set cache date
+        run: |
+          echo "CACHE_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+          echo "Cache date: $CACHE_DATE"
+
       - name: Restore ccache
         uses: actions/cache/restore@v4
         with:
           path: /mnt/openwrt/ccache
-          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v2-${{ github.run_id }}
+          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v3-${{ env.CACHE_DATE }}
           restore-keys: |
+            ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v3-
             ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v2-
 
       - name: Setup ccache
@@ -362,7 +368,7 @@ jobs:
         if: always()
         with:
           path: /mnt/openwrt/ccache
-          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v2-${{ github.run_id }}
+          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v3-${{ env.CACHE_DATE }}
 
       - name: Verify iStore compile result
         if: always()
