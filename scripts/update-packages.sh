@@ -220,6 +220,80 @@ else
 fi
 
 # ==========================================
+# dllkids Software Feed (Runtime)
+# ==========================================
+log_section "Setting up dllkids software feed (runtime)"
+
+# Create files directory structure (will be copied to firmware rootfs)
+mkdir -p ../files/etc/apk/keys
+mkdir -p ../files/etc/uci-defaults
+
+# Write public key for apk signature verification
+cat > ../files/etc/apk/keys/dllkids-feed.pub.pem << 'EOF'
+-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwTKjlQgSu4H+uwQt5PlHsFsxMehB
+JVXQOIgHzb6TOgvxY6nhY+e9SDWguPidN9V1o/6INgP/KT+yNvZo6ArTtg==
+-----END PUBLIC KEY-----
+EOF
+
+# Write uci-defaults script to add feed on first boot
+cat > ../files/etc/uci-defaults/99-add-dllkids-feed << 'EOF'
+#!/bin/sh
+# Add dllkids OpenWrt feed (runtime software source)
+# This script runs once on first boot and then auto-deletes
+
+# Get OpenWrt version from os-release
+OWRT_VERSION=""
+if [ -f /etc/os-release ]; then
+    OWRT_VERSION=$(grep -m1 'VERSION_ID' /etc/os-release | cut -d'"' -f2)
+fi
+
+# Only add feed for 25.12 (dllkids only supports 24.10 and 25.12)
+if [ "$OWRT_VERSION" != "25.12" ]; then
+    exit 0
+fi
+
+# Detect architecture - prefer DISTRIB_ARCH from openwrt_release
+# Reason: apk --print-arch only returns CPU family (e.g. aarch64)
+# but feed directories use full arch with subtarget (e.g. aarch64_cortex-a53)
+ARCH=""
+if [ -f /etc/openwrt_release ]; then
+    ARCH=$(sed -n "s/^DISTRIB_ARCH=['\"]\([^'\"]*\)['\"].*/\1/p" /etc/openwrt_release | head -n1)
+fi
+if [ -z "$ARCH" ]; then
+    ARCH=$(apk --print-arch 2>/dev/null)
+fi
+if [ -z "$ARCH" ]; then
+    exit 0
+fi
+
+# Feed URL - point directly to packages.adb (apk-tools v3 standard format)
+# Using directory format causes 404 warnings from v2 APKINDEX.tar.gz fallback
+FEED_URL="https://down.dllkids.xyz/openwrt-feed/25.12/${ARCH}/packages.adb"
+
+# Use repositories.d for cleaner separation (doesn't modify main repositories file)
+FEEDS_FILE="/etc/apk/repositories.d/customfeeds.list"
+
+# Check if already added (avoid duplicates)
+if grep -q "dllkids.xyz" "$FEEDS_FILE" 2>/dev/null; then
+    exit 0
+fi
+
+# Create directory and add feed
+mkdir -p "$(dirname "$FEEDS_FILE")"
+echo "${FEED_URL}" >> "$FEEDS_FILE"
+
+exit 0
+EOF
+
+chmod +x ../files/etc/uci-defaults/99-add-dllkids-feed
+
+log_info "dllkids software feed configured (runtime)"
+log_info "  - Public key: /etc/apk/keys/dllkids-feed.pub.pem"
+log_info "  - Auto-add script: /etc/uci-defaults/99-add-dllkids-feed"
+log_info "  - Feed activates automatically on first boot"
+
+# ==========================================
 # Summary
 # ==========================================
 
@@ -231,4 +305,5 @@ echo "  - Argon theme and config installed"
 echo "  - Default LuCI theme set to Argon"
 echo "  - PassWall2 installed (SSR disabled)"
 echo "  - PassWall dependencies installed"
+echo "  - dllkids software feed preset (runtime)"
 echo ""
