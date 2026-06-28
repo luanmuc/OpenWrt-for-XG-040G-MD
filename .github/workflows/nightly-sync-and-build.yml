@@ -1,3 +1,4 @@
+---
 name: Nightly Sync Upstream and Trigger Build
 
 permissions:
@@ -13,55 +14,71 @@ on:
 jobs:
   sync-and-dispatch:
     runs-on: ubuntu-latest
+
     steps:
       - name: Validate required secret
         run: |
+          echo "=== Validating required secrets ==="
           if [ -z "${{ secrets.OPENWRT_SYNC_TOKEN }}" ]; then
-            echo "Missing required secret: OPENWRT_SYNC_TOKEN"
+            echo "❌ Missing required secret: OPENWRT_SYNC_TOKEN"
             exit 1
           fi
+          echo "✅ Required secrets validated"
 
       - name: Sync fork branch with upstream (openwrt-25.12)
         env:
           GH_TOKEN: ${{ secrets.OPENWRT_SYNC_TOKEN }}
         run: |
+          echo "=== Syncing openwrt-25.12 branch ==="
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             /repos/xiangtailiang/openwrt/merge-upstream \
             -f branch='openwrt-25.12'
+          echo "✅ openwrt-25.12 branch synced"
 
       - name: Trigger firmware build workflow (openwrt-25.12)
         env:
           GH_TOKEN: ${{ secrets.OPENWRT_SYNC_TOKEN }}
         run: |
+          echo "=== Triggering openwrt-25.12 build ==="
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             /repos/xiangtailiang/OpenWrt-for-XG-040G-MD/actions/workflows/xg-040g-md-openwrt-25.12.yml/dispatches \
             -f ref='main'
+          echo "✅ openwrt-25.12 build triggered"
 
       - name: Sync fork branch with upstream (main)
         env:
           GH_TOKEN: ${{ secrets.OPENWRT_SYNC_TOKEN }}
         run: |
+          echo "=== Syncing main branch ==="
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             /repos/xiangtailiang/openwrt/merge-upstream \
             -f branch='main'
+          echo "✅ main branch synced"
 
       - name: Trigger firmware build workflow (main)
         env:
           GH_TOKEN: ${{ secrets.OPENWRT_SYNC_TOKEN }}
         run: |
+          echo "=== Triggering main build ==="
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
             /repos/xiangtailiang/OpenWrt-for-XG-040G-MD/actions/workflows/xg-040g-md-openwrt-main.yml/dispatches \
             -f ref='main'
+          echo "✅ main build triggered"
 
       - name: Summary
         run: |
-          echo "✅ Synced xiangtailiang/openwrt:openwrt-25.12 and triggered xg-040g-md-openwrt-25.12.yml"
-          echo "✅ Synced xiangtailiang/openwrt:main and triggered xg-040g-md-openwrt-main.yml"
+          echo "=== Sync and Build Summary ==="
+          echo "✅ Synced xiangtailiang/openwrt:openwrt-25.12"
+          echo "✅ Triggered xg-040g-md-openwrt-25.12.yml"
+          echo "✅ Synced xiangtailiang/openwrt:main"
+          echo "✅ Triggered xg-040g-md-openwrt-main.yml"
+          echo ""
+          echo "All sync and build tasks completed successfully"
