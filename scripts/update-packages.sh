@@ -330,6 +330,250 @@ log_info "  - Auto-add script: /etc/uci-defaults/99-add-dllkids-feed"
 log_info "  - Feed activates automatically on first boot"
 
 # ==========================================
+# MAC Address Fix for XG-040G-MD
+# ==========================================
+log_section "Setting up MAC address fix for XG-040G-MD"
+
+# Ensure uci-defaults directory exists
+mkdir -p ../files/etc/uci-defaults
+
+# Write uci-defaults script to fix MAC address on first boot
+cat > ../files/etc/uci-defaults/99-fix-mac-address << 'FIXMAC_EOF'
+#!/bin/sh
+# Fix MAC address randomization on Bell XG-040G-MD
+# This script runs once on first boot and then auto-deletes
+# SAFETY: This script only reads factory data, never writes to U-Boot or hardware
+
+. /lib/functions.sh
+. /lib/functions/system.sh
+
+log() {
+    logger -t "mac-fix" "$*"
+    echo "[mac-fix] $*"
+}
+
+# Only run on XG-040G-MD
+BOARD=$(board_name)
+if [ "$BOARD" != "bell,xg-040g-md" ]; then
+    exit 0
+fi
+
+log "Starting MAC address fix for $BOARD"
+
+# ==========================================
+# Helper: Check if MAC address is valid
+# ==========================================
+is_valid_mac() {
+    local mac="$1"
+    # Must be 6 colon-separated hex bytes
+    if ! echo "$mac" | grep -qE '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$'; then
+        return 1
+    fi
+    # Must not be all zeros
+    if [ "$mac" = "00:00:00:00:00:00" ]; then
+        return 1
+    fi
+    # Must not be broadcast/multicast (LSB of first byte is 0 for unicast)
+    local first_byte
+    first_byte=$(echo "$mac" | cut -d: -f1)
+    if [ $((0x$first_byte & 1)) -eq 1 ]; then
+        return 1
+    fi
+    return 0
+}
+
+# ==========================================
+# Helper: Generate stable random MAC from machine-id
+# ==========================================
+generate_stable_mac() {
+    local seed=""
+    
+    # Try to get unique identifier from machine-id
+    if [ -f /etc/machine-id ]; then
+        seed=$(cat /etc/machine-id)
+    fi
+    
+    # Fallback: use kernel command line or other sources
+    if [ -z "$seed" ]; then
+        seed=$(cat /proc/cmdline | md5sum | cut -d' ' -f1)
+    fi
+    
+    if [ -z "$seed" ]; then
+        # Last resort: truly random (will be different each boot, but saved to config)
+        seed=$(head -c 16 /dev/urandom | hexdump -n 16 -e '4/4 "%08x"' | head -n1)
+    fi
+    
+    # Generate MAC from seed (use Airoha OUI prefix: 00:0C:43 or similar)
+    # We'll use a locally administered address (bit 1 of first byte = 1)
+    # to avoid conflicts with real OUI
+    local mac
+    mac=$(echo "$seed" | md5sum | sed 's/\(..\)\(..\)\(..\)\(..\)\(..\)\(..\).*/\1:\2:\3:\4:\5:\6/')
+    
+    # Set locally administered bit and clear multicast bit
+    # First byte: xx | 0x02 (locally admin) & 0xFE (not multicast)
+    local first_byte
+    first_byte=$(echo "$mac" | cut -d: -f1)
+    first_byte=$(printf '%02x' $(( (0x$first_byte | 0x02) & 0xfe )))
+    mac="${first_byte}:$(echo "$mac" | cut -d: -f2-)"
+    
+    echo "$mac"
+}
+
+# ==========================================
+# Step 1: Try to read factory MAC from various sources
+# ==========================================
+WAN_MAC=""
+LAN_MAC=""
+
+# Method 1: Try fw_printenv (if available and working)
+if command -v fw_printenv >/dev/null 2>&1; then
+    log "Trying fw_printenv..."
+    WAN_MAC=$(fw_printenv -n ethaddr 2>/dev/null)
+    WAN_MAC=$(macaddr_canonicalize "$WAN_MAC")
+    if [ -n "$WAN_MAC" ] && is_valid_mac "$WAN_MAC"; then
+        log "Found MAC via fw_printenv: $WAN_MAC"
+    else
+        WAN_MAC=""
+    fi
+fi
+
+# Method 2: Try reading directly from "env" MTD partition
+if [ -z "$WAN_MAC" ]; then
+    log "Trying direct MTD read from env partition..."
+    ENV_IDX=$(find_mtd_index env 2>/dev/null || true)
+    if [ -n "$ENV_IDX" ] && [ -b "/dev/mtdblock$ENV_IDX" ]; then
+        WAN_MAC=$(strings "/dev/mtdblock$ENV_IDX" 2>/dev/null | sed -n 's/^ethaddr=//p' | head -n1)
+        WAN_MAC=$(macaddr_canonicalize "$WAN_MAC")
+        if [ -n "$WAN_MAC" ] && is_valid_mac "$WAN_MAC"; then
+            log "Found MAC via MTD env partition: $WAN_MAC"
+        else
+            WAN_MAC=""
+        fi
+    fi
+fi
+
+# Method 3: Try reading from "factory" partition (common on many devices)
+if [ -z "$WAN_MAC" ]; then
+    log "Trying factory partition..."
+    FACTORY_IDX=$(find_mtd_index factory 2>/dev/null || true)
+    if [ -n "$FACTORY_IDX" ] && [ -b "/dev/mtdblock$FACTORY_IDX" ]; then
+        # Try to find MAC in factory data (common patterns)
+        WAN_MAC=$(hexdump -C "/dev/mtdblock$FACTORY_IDX" 2>/dev/null | grep -oE '([0-9a-fA-F]{2} ){5}[0-9a-fA-F]{2}' | head -n1 | tr ' ' ':')
+        WAN_MAC=$(macaddr_canonicalize "$WAN_MAC")
+        if [ -n "$WAN_MAC" ] && is_valid_mac "$WAN_MAC"; then
+            log "Found MAC via factory partition: $WAN_MAC"
+        else
+            WAN_MAC=""
+        fi
+    fi
+fi
+
+# ==========================================
+# Step 2: If no factory MAC found, generate stable one
+# ==========================================
+if [ -z "$WAN_MAC" ] || ! is_valid_mac "$WAN_MAC"; then
+    log "No factory MAC found, generating stable MAC..."
+    WAN_MAC=$(generate_stable_mac)
+    log "Generated stable WAN MAC: $WAN_MAC"
+fi
+
+# ==========================================
+# Step 3: Derive LAN MAC (WAN + 1)
+# ==========================================
+if is_valid_mac "$WAN_MAC"; then
+    LAN_MAC=$(macaddr_add "$WAN_MAC" 1)
+    log "Derived LAN MAC: $LAN_MAC"
+fi
+
+# ==========================================
+# Step 4: Check if current config already has valid MACs
+# ==========================================
+CURRENT_WAN_MAC=""
+CURRENT_LAN_MAC=""
+
+# Get current WAN MAC from config
+if uci get network.wan.macaddr >/dev/null 2>&1; then
+    CURRENT_WAN_MAC=$(uci get network.wan.macaddr)
+fi
+
+# Get current LAN bridge MAC
+if uci get network.@device[0].macaddr >/dev/null 2>&1; then
+    CURRENT_LAN_MAC=$(uci get network.@device[0].macaddr 2>/dev/null || true)
+fi
+
+# Check if we need to update
+NEED_UPDATE=false
+
+if [ -n "$WAN_MAC" ] && is_valid_mac "$WAN_MAC"; then
+    if [ "$CURRENT_WAN_MAC" != "$WAN_MAC" ]; then
+        NEED_UPDATE=true
+    fi
+fi
+
+if [ -n "$LAN_MAC" ] && is_valid_mac "$LAN_MAC"; then
+    if [ "$CURRENT_LAN_MAC" != "$LAN_MAC" ]; then
+        NEED_UPDATE=true
+    fi
+fi
+
+if [ "$NEED_UPDATE" = false ]; then
+    log "MAC addresses already configured correctly, no changes needed"
+    exit 0
+fi
+
+# ==========================================
+# Step 5: Apply MAC addresses to network config
+# ==========================================
+log "Applying MAC addresses to network configuration..."
+
+# Set WAN MAC
+if [ -n "$WAN_MAC" ] && is_valid_mac "$WAN_MAC"; then
+    uci set network.wan.macaddr="$WAN_MAC"
+    log "  WAN MAC set to: $WAN_MAC"
+fi
+
+# Set LAN MAC on the bridge device
+# Find the br-lan device section
+if [ -n "$LAN_MAC" ] && is_valid_mac "$LAN_MAC"; then
+    # Try to find existing device section for br-lan
+    DEVICE_IDX=""
+    for i in $(seq 0 9); do
+        DEV_NAME=$(uci get network.@device[$i].name 2>/dev/null || true)
+        if [ "$DEV_NAME" = "br-lan" ]; then
+            DEVICE_IDX=$i
+            break
+        fi
+    done
+    
+    if [ -n "$DEVICE_IDX" ]; then
+        uci set network.@device[$DEVICE_IDX].macaddr="$LAN_MAC"
+        log "  LAN MAC set on br-lan device[$DEVICE_IDX]: $LAN_MAC"
+    else
+        # Create new device section for br-lan
+        uci add network device
+        uci set network.@device[-1].name="br-lan"
+        uci set network.@device[-1].macaddr="$LAN_MAC"
+        log "  Created br-lan device section with MAC: $LAN_MAC"
+    fi
+fi
+
+# Commit changes
+uci commit network
+log "MAC address configuration saved"
+
+log "MAC address fix completed successfully"
+
+exit 0
+FIXMAC_EOF
+
+chmod +x ../files/etc/uci-defaults/99-fix-mac-address
+log_info "MAC address fix configured"
+log_info "  - Script: /etc/uci-defaults/99-fix-mac-address"
+log_info "  - Runs once on first boot, then auto-deletes"
+log_info "  - SAFETY: Only reads factory data, never modifies U-Boot or hardware"
+log_info "  - Features: Multiple MAC detection methods + stable fallback"
+
+# ==========================================
 # Summary
 # ==========================================
 
@@ -342,4 +586,5 @@ echo "  - Default LuCI theme set to Argon"
 echo "  - PassWall2 installed (SSR disabled)"
 echo "  - PassWall dependencies installed"
 echo "  - dllkids software feed preset (runtime)"
+echo "  - MAC address fix for XG-040G-MD"
 echo ""
