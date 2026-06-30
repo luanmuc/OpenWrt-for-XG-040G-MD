@@ -38,6 +38,32 @@ log_section() {
     echo "=========================================="
 }
 
+# Git clone with retry mechanism
+# Usage: git_clone_with_retry <clone_args...>
+git_clone_with_retry() {
+    local max_retries=3
+    local retry_delay=5
+    local attempt=1
+
+    while [ $attempt -le $max_retries ]; do
+        log_info "Git clone attempt $attempt/$max_retries"
+        if git clone "$@"; then
+            log_info "Git clone succeeded"
+            return 0
+        fi
+
+        if [ $attempt -lt $max_retries ]; then
+            log_warn "Git clone failed, retrying in ${retry_delay}s..."
+            sleep $retry_delay
+        fi
+
+        attempt=$((attempt + 1))
+    done
+
+    log_error "Git clone failed after $max_retries attempts"
+    return 1
+}
+
 # ==========================================
 # Package Update Function
 # ==========================================
@@ -94,8 +120,8 @@ UPDATE_PACKAGE() {
 
     CLONE_CMD+=("https://github.com/$PKG_REPO.git")
 
-    if ! "${CLONE_CMD[@]}"; then
-        log_error "Failed to clone $PKG_REPO"
+    if ! git_clone_with_retry "${CLONE_CMD[@]:2}"; then
+        log_error "Failed to clone $PKG_REPO after retries"
         return 1
     fi
 
@@ -187,6 +213,16 @@ if [ -f "$PASSWALL2_MAKEFILE" ]; then
     log_info "Patching PassWall2 defaults to disable broken ShadowsocksR components..."
     sed -i '/config PACKAGE_$(PKG_NAME)_INCLUDE_ShadowsocksR_Libev_Client/,/default y/s/default y/default n/' "$PASSWALL2_MAKEFILE"
     sed -i '/config PACKAGE_$(PKG_NAME)_INCLUDE_ShadowsocksR_Libev_Server/,/default n/s/default n/default n/' "$PASSWALL2_MAKEFILE"
+
+    # Verify the patch was applied successfully
+    if grep -q "INCLUDE_ShadowsocksR_Libev_Client" "$PASSWALL2_MAKEFILE"; then
+        if grep -A5 "INCLUDE_ShadowsocksR_Libev_Client" "$PASSWALL2_MAKEFILE" | grep -q "default y"; then
+            log_warn "ShadowsocksR Client patch may not have been applied correctly"
+        else
+            log_info "ShadowsocksR Client successfully disabled"
+        fi
+    fi
+
     log_info "PassWall2 SSR components disabled"
 else
     log_warn "PassWall2 Makefile not found, skipping SSR patch"
@@ -198,8 +234,8 @@ fi
 
 log_section "Installing PassWall dependencies"
 
-if ! git clone --depth=1 --single-branch --branch main "https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git"; then
-    log_error "Failed to clone passwall-packages repository"
+if ! git_clone_with_retry --depth=1 --single-branch --branch main "https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git"; then
+    log_error "Failed to clone passwall-packages repository after retries"
     exit 1
 fi
 
