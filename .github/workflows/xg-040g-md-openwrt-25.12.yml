@@ -40,6 +40,7 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
@@ -399,18 +400,76 @@ jobs:
             echo "Mode: Verbose single-thread build (for debugging)"
             make -j1 V=s || {
               echo "❌ Compilation failed"
-              echo "Disk usage diagnostics:"
+              echo ""
+              echo "=========================================="
+              echo "Diagnostic Information"
+              echo "=========================================="
+              echo ""
+              echo "=== System Info ==="
+              uname -a
+              uptime
+              echo ""
+              echo "=== Memory Usage ==="
+              free -h
+              echo ""
+              echo "=== Disk Usage ==="
               df -h
+              echo ""
+              echo "=== Disk Inode Usage ==="
+              df -i
+              echo ""
+              echo "=== Top Processes (by memory) ==="
+              ps aux --sort=-%mem | head -20
+              echo ""
+              echo "=== Top Processes (by CPU) ==="
+              ps aux --sort=-%cpu | head -20
+              echo ""
+              echo "=== Directory Sizes ==="
               du -h -d1 . | sort -h | tail -n 30
+              echo ""
+              echo "=== ccache Status ==="
+              ccache -s || true
+              echo ""
+              echo "=== Recent Kernel Logs ==="
+              dmesg | tail -30 || true
               exit 1
             }
           else
             echo "Mode: Multi-thread fast build"
             make -j$(nproc) || {
               echo "❌ Compilation failed"
-              echo "Disk usage diagnostics:"
+              echo ""
+              echo "=========================================="
+              echo "Diagnostic Information"
+              echo "=========================================="
+              echo ""
+              echo "=== System Info ==="
+              uname -a
+              uptime
+              echo ""
+              echo "=== Memory Usage ==="
+              free -h
+              echo ""
+              echo "=== Disk Usage ==="
               df -h
+              echo ""
+              echo "=== Disk Inode Usage ==="
+              df -i
+              echo ""
+              echo "=== Top Processes (by memory) ==="
+              ps aux --sort=-%mem | head -20
+              echo ""
+              echo "=== Top Processes (by CPU) ==="
+              ps aux --sort=-%cpu | head -20
+              echo ""
+              echo "=== Directory Sizes ==="
               du -h -d1 . | sort -h | tail -n 30
+              echo ""
+              echo "=== ccache Status ==="
+              ccache -s || true
+              echo ""
+              echo "=== Recent Kernel Logs ==="
+              dmesg | tail -30 || true
               exit 1
             }
           fi
