@@ -1,0 +1,222 @@
+#!/bin/sh
+# MAC地址持久化修复脚本
+# 功能：从多个来源读取设备原厂MAC地址，写入UCI网络配置，确保刷机后MAC地址不变
+# 特点：只读不写U-Boot环境，只修改UCI配置，安全可靠
+# 支持设备：Bell XG-040G-MD / Nokia XG-040G-MD
+
+[ -e /etc/config/network ] || exit 0
+
+. /lib/functions.sh
+. /lib/functions/system.sh
+
+# ============================================================
+# MAC地址合法性校验函数
+# 校验规则：
+#   1. 格式必须为 XX:XX:XX:XX:XX:XX（十六进制，冒号分隔）
+#   2. 不能是全零地址 00:00:00:00:00:00
+#   3. 不能是多播地址（第一个字节最低位为1）
+# ============================================================
+validate_mac() {
+	local mac="$1"
+
+	# 格式校验：6组两位十六进制，冒号分隔
+	echo "$mac" | grep -qE '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$' || return 1
+
+	# 全零地址校验
+	[ "$mac" = "00:00:00:00:00:00" ] && return 1
+
+	# 多播位校验：第一个字节的最低位（bit 0）不能为1
+	local first_byte=$(echo "$mac" | cut -d: -f1)
+	local first_dec=$((0x$first_byte))
+	[ $((first_dec & 1)) -eq 1 ] && return 1
+
+	return 0
+}
+
+# ============================================================
+# 第一级读取：通过 fw_printenv 读取 U-Boot 环境变量
+# 优先使用标准工具读取U-Boot环境中的ethaddr
+# ============================================================
+read_mac_from_fw_printenv() {
+	local mac=""
+
+	if command -v fw_printenv >/dev/null 2>&1; then
+		mac=$(fw_printenv -n ethaddr 2>/dev/null)
+		if [ -n "$mac" ] && validate_mac "$mac"; then
+			echo "$mac"
+			return 0
+		fi
+	fi
+
+	return 1
+}
+
+# ============================================================
+# 第二级读取：直接读取 env 分区原始数据
+# 当 fw_printenv 不可用时，直接从MTD分区解析环境变量
+# ============================================================
+read_mac_from_env_partition() {
+	local mac=""
+	local env_part=""
+
+	# 查找env分区
+	env_part=$(grep -l '"env"' /sys/class/mtd/*/name 2>/dev/null | head -1 | sed 's|/name$||')
+	[ -z "$env_part" ] && return 1
+
+	local env_dev="/dev/$(basename "$env_part")"
+	[ -e "$env_dev" ] || return 1
+
+	# 从原始分区数据中提取ethaddr值
+	mac=$(strings "$env_dev" 2>/dev/null | grep -m1 '^ethaddr=' | cut -d= -f2)
+	if [ -n "$mac" ] && validate_mac "$mac"; then
+		echo "$mac"
+		return 0
+	fi
+
+	return 1
+}
+
+# ============================================================
+# 第三级读取：从 factory 分区扫描 MAC 地址
+# 在出厂分区中查找合法的MAC地址模式
+# ============================================================
+read_mac_from_factory_partition() {
+	local mac=""
+	local factory_part=""
+
+	# 查找factory分区（不同固件可能命名为factory或art）
+	for part_name in factory art; do
+		factory_part=$(grep -l "\"$part_name\"" /sys/class/mtd/*/name 2>/dev/null | head -1 | sed 's|/name$||')
+		[ -n "$factory_part" ] && break
+	done
+
+	[ -z "$factory_part" ] && return 1
+
+	local factory_dev="/dev/$(basename "$factory_part")"
+	[ -e "$factory_dev" ] || return 1
+
+	# 从分区中提取所有符合MAC格式的字符串，取第一个合法的
+	mac=$(hexdump -C "$factory_dev" 2>/dev/null | grep -oE '([0-9a-f]{2} ){5}[0-9a-f]{2}' | head -1 | tr ' ' ':')
+	if [ -n "$mac" ] && validate_mac "$mac"; then
+		echo "$mac"
+		return 0
+	fi
+
+	return 1
+}
+
+# ============================================================
+# 兜底方案：基于 machine-id 生成稳定的随机MAC
+# 使用设备唯一的machine-id哈希生成MAC，确保同一设备每次生成结果一致
+# 生成的MAC设置本地管理位（bit 1），清除多播位（bit 0）
+# ============================================================
+generate_mac_from_machine_id() {
+	local machine_id=""
+	local hash=""
+
+	# 读取machine-id
+	if [ -f /etc/machine-id ]; then
+		machine_id=$(cat /etc/machine-id 2>/dev/null)
+	elif [ -f /proc/sys/kernel/random/boot_id ]; then
+		machine_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+	fi
+
+	[ -z "$machine_id" ] && return 1
+
+	# 使用md5哈希生成稳定值
+	hash=$(echo -n "$machine_id" | md5sum 2>/dev/null | cut -c1-12)
+	[ -z "$hash" ] && return 1
+
+	# 格式化MAC地址：设置本地管理位(bit 1=1)，清除多播位(bit 0=0)
+	# 第一个字节：xx → xx & 0xFE | 0x02
+	local first_hex=${hash:0:2}
+	local first_dec=$((0x$first_hex))
+	first_dec=$(( (first_dec & 0xFE) | 0x02 ))
+	first_hex=$(printf '%02x' "$first_dec")
+
+	local mac="${first_hex}:${hash:2:2}:${hash:4:2}:${hash:6:2}:${hash:8:2}:${hash:10:2}"
+
+	echo "$mac"
+	return 0
+}
+
+# ============================================================
+# 主逻辑：三级fallback读取MAC地址
+# 优先级：fw_printenv > env分区 > factory分区 > machine-id生成
+# ============================================================
+get_mac_address() {
+	local mac=""
+
+	# 第一级：fw_printenv
+	mac=$(read_mac_from_fw_printenv)
+	[ -n "$mac" ] && echo "$mac" && return 0
+
+	# 第二级：直接读env分区
+	mac=$(read_mac_from_env_partition)
+	[ -n "$mac" ] && echo "$mac" && return 0
+
+	# 第三级：factory分区扫描
+	mac=$(read_mac_from_factory_partition)
+	[ -n "$mac" ] && echo "$mac" && return 0
+
+	# 兜底：基于machine-id生成
+	mac=$(generate_mac_from_machine_id)
+	[ -n "$mac" ] && echo "$mac" && return 0
+
+	return 1
+}
+
+# ============================================================
+# 写入UCI网络配置
+# 只修改UCI配置，不触碰U-Boot环境变量
+# ============================================================
+set_wan_mac() {
+	local mac="$1"
+
+	# 获取当前WAN口配置的MAC
+	local current_mac=$(uci get network.wan.macaddr 2>/dev/null)
+
+	# 如果已经配置且相同，跳过（幂等性保证）
+	[ "$current_mac" = "$mac" ] && return 0
+
+	# 设置WAN口MAC地址
+	uci set network.wan.macaddr="$mac"
+	uci commit network
+
+	return 0
+}
+
+# ============================================================
+# 主程序入口
+# ============================================================
+main() {
+	local board_name=""
+	local mac=""
+
+	# 获取设备型号，支持bell和nokia两种命名
+	board_name=$(cat /tmp/sysinfo/board_name 2>/dev/null)
+
+	# 仅在目标设备上执行
+	case "$board_name" in
+		*bell_xg-040g-md*|*nokia_xg-040g-md*|*xg-040g-md*)
+			;;
+		*)
+			exit 0
+			;;
+	esac
+
+	# 获取MAC地址（三级fallback）
+	mac=$(get_mac_address)
+	if [ -z "$mac" ]; then
+		logger -t fix-mac "WARNING: Failed to get valid MAC address from all sources"
+		exit 1
+	fi
+
+	# 写入UCI配置
+	set_wan_mac "$mac"
+	logger -t fix-mac "WAN MAC address set to: $mac"
+
+	exit 0
+}
+
+main "$@"
