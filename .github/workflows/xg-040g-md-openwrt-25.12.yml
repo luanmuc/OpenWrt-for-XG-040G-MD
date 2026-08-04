@@ -328,7 +328,9 @@ jobs:
         id: tag
         if: env.UPLOAD_RELEASE == 'true'
         run: |
-          echo "release_tag=OpenWrt-25.12-$(date +"%Y.%m.%d-%H%M%S")" >> $GITHUB_OUTPUT
+          RELEASE_DATE=$(date +"%Y.%m.%d-%H%M%S")
+          echo "release_tag=v${RELEASE_DATE}-openwrt-25.12" >> $GITHUB_OUTPUT
+          echo "release_name=OpenWrt-25.12-${RELEASE_DATE}" >> $GITHUB_OUTPUT
           cat <<EOF > release.txt
           🚀 OpenWrt firmware for XG-040G-MD (openwrt-25.12)
           ----------------------
@@ -344,6 +346,7 @@ jobs:
         if: env.UPLOAD_RELEASE == 'true'
         with:
           tag: ${{ steps.tag.outputs.release_tag }}
+          name: ${{ steps.tag.outputs.release_name }}
           bodyFile: release.txt
           artifacts: |
             ${{ env.FIRMWARE }}/*
