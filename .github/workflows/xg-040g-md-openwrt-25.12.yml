@@ -157,6 +157,11 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
           bash $GITHUB_WORKSPACE/scripts/update-packages.sh
           
+      - name: Add NPU plugin
+        working-directory: ./openwrt/package
+        run: |
+          git clone https://github.com/luanmuc/luci-app-airoha-npu.git luci-app-airoha-npu
+          
       - name: Apply base-files patch
         run: cp -rv $GITHUB_WORKSPACE/patch/base-files/* openwrt/package/base-files/files/
           
