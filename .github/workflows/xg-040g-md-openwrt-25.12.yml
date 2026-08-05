@@ -152,16 +152,11 @@ jobs:
               echo "" >> "$OAF_SRC_MAKEFILE"
               echo "ccflags-y += \$(EXTRA_CFLAGS)" >> "$OAF_SRC_MAKEFILE"
           fi
-      - name: Install third-party packages (homeproxy, passwall)
+      - name: Install third-party packages (homeproxy, NPU plugin, etc.)
         working-directory: ./openwrt/package
         run: |
           chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
           bash $GITHUB_WORKSPACE/scripts/update-packages.sh
-          
-      - name: Add NPU plugin
-        working-directory: ./openwrt/package
-        run: |
-          git clone https://github.com/luanmuc/luci-app-airoha-npu.git luci-app-airoha-npu
           
       - name: Apply base-files patch
         run: cp -rv $GITHUB_WORKSPACE/patch/base-files/* openwrt/package/base-files/files/
@@ -312,10 +307,21 @@ jobs:
             echo "WARN: NPU menu config file not found (file existence check only, build continues)"
           fi
           
-          echo "=== 7/9 验证 devmem 配置（内核+用户空间两层保障） ==="
-          grep -q "CONFIG_KERNEL_DEVMEM=y" .config || { echo "FAIL: CONFIG_KERNEL_DEVMEM not set to y (kernel layer)"; exit 1; }
-          grep -q "CONFIG_BUSYBOX_DEFAULT_DEVMEM=y" .config || { echo "FAIL: CONFIG_BUSYBOX_DEFAULT_DEVMEM not set to y (userspace layer)"; exit 1; }
-          echo "PASS (both kernel and userspace devmem enabled)"
+          echo "=== 7/9 验证 devmem 配置（三层保障） ==="
+          if grep -q "CONFIG_KERNEL_DEVMEM=y" .config && grep -q "CONFIG_BUSYBOX_CUSTOM=y" .config && grep -q "CONFIG_BUSYBOX_CONFIG_DEVMEM=y" .config; then
+            echo "PASS (all three layers of devmem enabled)"
+            DEVMEM_MODE="three-layer"
+          else
+            echo "WARN: three-layer devmem check failed, executing fallback..."
+            # Fallback兜底机制：尝试旧的两层保障模式
+            if grep -q "CONFIG_KERNEL_DEVMEM=y" .config && grep -q "CONFIG_BUSYBOX_DEFAULT_DEVMEM=y" .config; then
+              echo "PASS (fallback: two-layer devmem enabled)"
+              DEVMEM_MODE="two-layer-fallback"
+            else
+              echo "FAIL: both three-layer and two-layer devmem checks failed"
+              exit 1
+            fi
+          fi
           
           echo "=== 8/9 验证 NPU 固件包配置 ==="
           grep -q "CONFIG_PACKAGE_airoha-en7581-npu-firmware=y" .config || { echo "FAIL: NPU firmware package not enabled"; exit 1; }

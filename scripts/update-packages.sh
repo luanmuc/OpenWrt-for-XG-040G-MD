@@ -109,6 +109,23 @@ else
 	echo "WARNING: No LuCI collection Makefile found, skip theme default patch"
 fi
 
+# NPU插件（3号仓库，Makefile已为绝对路径，无需sed修改）
+echo " "
+echo "=========================================="
+echo "Installing NPU plugin (luci-app-airoha-npu)..."
+echo "=========================================="
+if [ -d "luci-app-airoha-npu" ]; then
+	rm -rf luci-app-airoha-npu
+	echo "Removed existing luci-app-airoha-npu directory"
+fi
+git clone --depth=1 https://github.com/luanmuc/luci-app-airoha-npu.git luci-app-airoha-npu
+if [ -d "luci-app-airoha-npu" ]; then
+	echo "Done: NPU plugin installed"
+else
+	echo "ERROR: Failed to clone NPU plugin"
+	exit 1
+fi
+
 echo " "
 echo "=========================================="
 echo "Package updates completed!"
