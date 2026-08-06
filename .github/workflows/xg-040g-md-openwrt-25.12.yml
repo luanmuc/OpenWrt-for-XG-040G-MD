@@ -129,6 +129,11 @@ jobs:
           ./scripts/feeds install -a -f
           # 专门从 istore feed 安装 luci-app-store（-d y 自动启用依赖）
           ./scripts/feeds install -d y -p istore luci-app-store
+          # 适配 iStore 新目录结构：把 luci/ 子目录下的包移到上层（iStore官方重构了目录结构）
+          if [ -d package/feeds/istore/luci ]; then
+            mv package/feeds/istore/luci/* package/feeds/istore/
+            echo "iStore directory flattened: luci/* moved to istore root"
+          fi
           # Fix 1: iStore条件依赖兼容性修复（整行替换opkg条件依赖为 +apk-mbedtls +luci-compat）
           if [ -f package/feeds/istore/luci-app-store/Makefile ]; then
             sed -i '/LUCI_DEPENDS+=.*opkg/c\LUCI_DEPENDS+=+apk-mbedtls +luci-compat' package/feeds/istore/luci-app-store/Makefile

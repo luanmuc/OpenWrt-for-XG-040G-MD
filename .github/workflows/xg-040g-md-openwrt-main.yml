@@ -131,6 +131,11 @@ jobs:
         run: |
           # 克隆 iStore 源码到 package/istore（直接源码克隆，不通过feed）
           git clone --depth=1 --branch main https://github.com/linkease/istore.git istore
+          # 适配 iStore 新目录结构：把 luci/ 子目录下的包移到根目录（iStore官方重构了目录结构）
+          if [ -d istore/luci ]; then
+            mv istore/luci/* istore/
+            echo "iStore directory flattened: luci/* moved to istore root"
+          fi
           # Fix 1: iStore条件依赖兼容性修复（整行替换opkg条件依赖为 +apk-mbedtls +luci-compat）
           if [ -f istore/luci-app-store/Makefile ]; then
             sed -i '/LUCI_DEPENDS+=.*opkg/c\LUCI_DEPENDS+=+apk-mbedtls +luci-compat' istore/luci-app-store/Makefile
