@@ -1,7 +1,7 @@
 #!/bin/sh
 # ============================================================
 # kenzok8 源配置 - hotplug 网络接口触发脚本
-# 
+#
 # 功能：监听 WAN 接口上线事件，网络就绪后自动触发源配置
 # 触发时机：任意 WAN 类接口 ifup（上线）时
 # 设计原则：
@@ -36,10 +36,18 @@ if [ "$ACTION" != "ifup" ]; then
 fi
 
 # 第三步：只处理 WAN 类接口
-# 常见 WAN 接口名：wan、wan6、pppoe-wan、eth1、wwan 等
-# 用 case 匹配，兼容多种命名方式
+# 匹配规则：
+#   - 精确匹配常见 WAN 接口名
+#   - 以 "wan" 开头的接口（wan、wan6、wan_eth、wan_pppoe 等）
+#   - 常见物理/虚拟 WAN 接口
 case "$INTERFACE" in
-    wan|wan6|pppoe-wan|wwan|eth1|usb0)
+    wan|wan6|wan_6|wan_eth|wan_ppp|wan_pppoe|wan_lte|wan_5g|\
+    pppoe-wan|pppoe-wan6|\
+    eth0.2|eth1|eth2|\
+    wwan|wwan0|wwan1|\
+    usb0|usb1|usb2|\
+    modem|modem_1|modem1|\
+    wan*)
         # 匹配到 WAN 类接口，继续
         ;;
     *)
