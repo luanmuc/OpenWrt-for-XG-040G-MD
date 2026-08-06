@@ -355,6 +355,27 @@ jobs:
           
           [ -e .config ] && cp .config defconfig-final.config
 
+      - name: Verify key packages
+        working-directory: ./openwrt
+        run: |
+          echo "=== 验证关键包配置 ==="
+          
+          # 验证 ucode-mod-math（Argon主题依赖）
+          grep -q "CONFIG_PACKAGE_ucode-mod-math=y" .config || {
+            echo "FAIL: ucode-mod-math 未启用"
+            exit 1
+          }
+          echo "PASS: ucode-mod-math 已启用"
+          
+          # 验证 Argon 主题
+          grep -q "CONFIG_PACKAGE_luci-theme-argon=y" .config || {
+            echo "FAIL: luci-theme-argon 未启用"
+            exit 1
+          }
+          echo "PASS: luci-theme-argon 已启用"
+          
+          echo "=== 所有关键包验证通过 ==="
+
       - name: Upload build config files
         uses: actions/upload-artifact@v6
         with:
