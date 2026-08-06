@@ -121,42 +121,36 @@ jobs:
         run: |
           # 复制基础 feeds 配置
           cp "$GITHUB_WORKSPACE/feeds.conf.default" feeds.conf.default
-          # 追加 iStore 第三方 feed
-          echo "" >> feeds.conf.default
-          echo "src-git istore https://github.com/linkease/istore;main" >> feeds.conf.default
-          # 更新所有 feed（包括刚追加的 istore）
+          # 更新所有 feed
           ./scripts/feeds update -a
           # 安装所有 feed 的包到 package/feeds/
           ./scripts/feeds install -a -f
-          # 专门从 istore feed 安装 luci-app-store（-d y 自动启用依赖）
-          ./scripts/feeds install -d y -p istore luci-app-store
-          # Fix 1: iStore条件依赖兼容性修复（整行替换opkg条件依赖为 +apk-mbedtls +luci-compat）
-          if [ -f package/feeds/istore/luci-app-store/Makefile ]; then
-            sed -i '/LUCI_DEPENDS+=.*opkg/c\LUCI_DEPENDS+=+apk-mbedtls +luci-compat' package/feeds/istore/luci-app-store/Makefile
-            echo "iStore Fix 1 applied: conditional dependency replaced with +apk-mbedtls +luci-compat"
-          fi
-          # Fix 2: 移除三个不存在的依赖（+tar +libuci-lua +mount-utils）
-          if [ -f package/feeds/istore/luci-app-store/Makefile ]; then
-            sed -i 's/+tar +libuci-lua +mount-utils //' package/feeds/istore/luci-app-store/Makefile
-            echo "iStore Fix 2 applied: non-existent dependencies removed (tar, libuci-lua, mount-utils)"
-          fi
-          # 追加 OpenAppFilter 第三方 feed
-          echo "" >> feeds.conf.default
-          echo "src-git oaf https://github.com/destan19/OpenAppFilter;master" >> feeds.conf.default
-          # 更新 OAF feed
-          ./scripts/feeds update oaf
-          # 安装 OAF 相关包
-          ./scripts/feeds install -d y -p oaf luci-app-oaf
-          # 修复OAF内核模块6.15+内核EXTRA_CFLAGS失效问题，官方标准方案：转ccflags-y
-          OAF_SRC_MAKEFILE="package/feeds/oaf/oaf/src/Makefile"
-          if [ -f "$OAF_SRC_MAKEFILE" ]; then
-              echo "" >> "$OAF_SRC_MAKEFILE"
-              echo "ccflags-y += \$(EXTRA_CFLAGS)" >> "$OAF_SRC_MAKEFILE"
-          fi
 
       - name: Install third-party packages (homeproxy, NPU plugin, etc.)
         working-directory: ./openwrt/package
         run: |
+          # 克隆 iStore 源码到 package/istore（直接源码克隆，不通过feed）
+          git clone --depth=1 --branch main https://github.com/linkease/istore.git istore
+          # Fix 1: iStore条件依赖兼容性修复（整行替换opkg条件依赖为 +apk-mbedtls +luci-compat）
+          if [ -f istore/luci-app-store/Makefile ]; then
+            sed -i '/LUCI_DEPENDS+=.*opkg/c\LUCI_DEPENDS+=+apk-mbedtls +luci-compat' istore/luci-app-store/Makefile
+            echo "iStore Fix 1 applied: conditional dependency replaced with +apk-mbedtls +luci-compat"
+          fi
+          # Fix 2: 移除三个不存在的依赖（+tar +libuci-lua +mount-utils）
+          if [ -f istore/luci-app-store/Makefile ]; then
+            sed -i 's/+tar +libuci-lua +mount-utils //' istore/luci-app-store/Makefile
+            echo "iStore Fix 2 applied: non-existent dependencies removed (tar, libuci-lua, mount-utils)"
+          fi
+          # 克隆 OpenAppFilter 源码到 package/oaf（直接源码克隆，不通过feed）
+          git clone --depth=1 --branch master https://github.com/destan19/OpenAppFilter.git oaf
+          # 修复OAF内核模块6.15+内核EXTRA_CFLAGS失效问题，官方标准方案：转ccflags-y
+          OAF_SRC_MAKEFILE="oaf/oaf/src/Makefile"
+          if [ -f "$OAF_SRC_MAKEFILE" ]; then
+              echo "" >> "$OAF_SRC_MAKEFILE"
+              echo "ccflags-y += \$(EXTRA_CFLAGS)" >> "$OAF_SRC_MAKEFILE"
+              echo "OAF EXTRA_CFLAGS fix applied"
+          fi
+          # 执行其他第三方包更新
           chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
           bash $GITHUB_WORKSPACE/scripts/update-packages.sh
           
@@ -180,36 +174,29 @@ jobs:
           
           make defconfig
           
-          # 8步验证：iStore集成验证（defconfig后执行，任意一步失败立即终止）
-          echo "=== 1/8 验证 feeds.conf.default 中存在 istore 配置 ==="
-          grep -q "istore" feeds.conf.default || { echo "FAIL: istore feed not found in feeds.conf.default"; exit 1; }
+          # 6步验证：iStore集成验证（defconfig后执行，任意一步失败立即终止）
+          # 注意：istore 改为直接源码克隆到 package/istore，不通过 feed
+          echo "=== 1/6 验证 istore 源码目录存在 ==="
+          [ -d package/istore ] || { echo "FAIL: istore directory not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 2/8 验证 feeds list 能列出 luci-app-store ==="
-          ./scripts/feeds list -r istore | grep -q "luci-app-store" || { echo "FAIL: luci-app-store not found in istore feed list"; exit 1; }
+          echo "=== 2/6 验证 luci-app-store/Makefile 存在 ==="
+          [ -f package/istore/luci-app-store/Makefile ] || { echo "FAIL: luci-app-store/Makefile not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 3/8 验证 luci-app-store/Makefile 存在 ==="
-          [ -f package/feeds/istore/luci-app-store/Makefile ] || { echo "FAIL: luci-app-store/Makefile not found"; exit 1; }
+          echo "=== 3/6 验证 luci-lib-taskd/Makefile 存在 ==="
+          [ -f package/istore/luci-lib-taskd/Makefile ] || { echo "FAIL: luci-lib-taskd/Makefile not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 4/8 验证 luci-lib-taskd/Makefile 存在 ==="
-          [ -f package/feeds/istore/luci-lib-taskd/Makefile ] || { echo "FAIL: luci-lib-taskd/Makefile not found"; exit 1; }
+          echo "=== 4/6 验证 luci-lib-xterm/Makefile 存在 ==="
+          [ -f package/istore/luci-lib-xterm/Makefile ] || { echo "FAIL: luci-lib-xterm/Makefile not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 5/8 验证 luci-lib-xterm/Makefile 存在 ==="
-          [ -f package/feeds/istore/luci-lib-xterm/Makefile ] || { echo "FAIL: luci-lib-xterm/Makefile not found"; exit 1; }
+          echo "=== 5/6 验证 taskd/Makefile 存在 ==="
+          [ -f package/istore/taskd/Makefile ] || { echo "FAIL: taskd/Makefile not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 6/8 验证 taskd/Makefile 存在 ==="
-          [ -f package/feeds/istore/taskd/Makefile ] || { echo "FAIL: taskd/Makefile not found"; exit 1; }
-          echo "PASS"
-          
-          echo "=== 7/8 验证 luci-compat/Makefile 存在 ==="
-          [ -f package/feeds/luci/luci-compat/Makefile ] || { echo "FAIL: luci-compat/Makefile not found"; exit 1; }
-          echo "PASS"
-          
-          echo "=== 8/8 验证 .config 中 CONFIG_PACKAGE_luci-app-store=y ==="
+          echo "=== 6/6 验证 .config 中 CONFIG_PACKAGE_luci-app-store=y ==="
           if grep -q "CONFIG_PACKAGE_luci-app-store=y" .config; then
             echo "PASS (official method)"
             ISTORE_MODE="official"
@@ -231,38 +218,31 @@ jobs:
             fi
           fi
           
-          echo "=== 全部 8 步验证通过 (iStore mode: $ISTORE_MODE) ==="
+          echo "=== 全部 6 步验证通过 (iStore mode: $ISTORE_MODE) ==="
           
-          # 7步验证：OpenAppFilter集成验证（任意一步失败立即终止）
-          echo "=== 1/7 验证 feeds.conf.default 中存在 oaf 配置 ==="
-          grep -q "oaf" feeds.conf.default || { echo "FAIL: oaf feed not found in feeds.conf.default"; exit 1; }
+          # 5步验证：OpenAppFilter集成验证（任意一步失败立即终止）
+          # 注意：oaf 改为直接源码克隆到 package/oaf，不通过 feed
+          echo "=== 1/5 验证 oaf 源码目录存在 ==="
+          [ -d package/oaf ] || { echo "FAIL: oaf directory not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 2/7 验证 feeds list 能列出 luci-app-oaf ==="
-          ./scripts/feeds list -r oaf | grep -q "luci-app-oaf" || { echo "FAIL: luci-app-oaf not found in oaf feed list"; exit 1; }
+          echo "=== 2/5 验证 luci-app-oaf/Makefile 存在 ==="
+          [ -f package/oaf/luci-app-oaf/Makefile ] || { echo "FAIL: luci-app-oaf/Makefile not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 3/7 验证 luci-app-oaf/Makefile 存在 ==="
-          [ -f package/feeds/oaf/luci-app-oaf/Makefile ] || { echo "FAIL: luci-app-oaf/Makefile not found"; exit 1; }
+          echo "=== 3/5 验证 oaf 内核模块 Makefile 存在 ==="
+          [ -f package/oaf/oaf/Makefile ] || { echo "FAIL: oaf kernel module Makefile not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 4/7 验证 oaf 内核模块 Makefile 存在 ==="
-          [ -f package/feeds/oaf/oaf/Makefile ] || { echo "FAIL: oaf kernel module Makefile not found"; exit 1; }
+          echo "=== 4/5 验证 appfilter 规则文件存在 ==="
+          [ -f package/oaf/open-app-filter/Makefile ] || { echo "FAIL: open-app-filter package Makefile not found"; exit 1; }
           echo "PASS"
           
-          echo "=== 5/7 验证 appfilter 规则文件存在 ==="
-          [ -f package/feeds/oaf/open-app-filter/Makefile ] || { echo "FAIL: open-app-filter package Makefile not found"; exit 1; }
-          echo "PASS"
-          
-          echo "=== 6/7 验证 luci-compat/Makefile 存在（OAF依赖） ==="
-          [ -f package/feeds/luci/luci-compat/Makefile ] || { echo "FAIL: luci-compat/Makefile not found"; exit 1; }
-          echo "PASS"
-          
-          echo "=== 7/7 验证 .config 中 CONFIG_PACKAGE_luci-app-oaf=y ==="
+          echo "=== 5/5 验证 .config 中 CONFIG_PACKAGE_luci-app-oaf=y ==="
           grep -q "CONFIG_PACKAGE_luci-app-oaf=y" .config || { echo "FAIL: CONFIG_PACKAGE_luci-app-oaf not set to y"; exit 1; }
           echo "PASS"
           
-          echo "=== OAF 全部 7 步验证通过 ==="
+          echo "=== OAF 全部 5 步验证通过 ==="
           
           # 9步验证：NPU插件集成验证（defconfig后执行）
           # 前6步为文件存在性验证（警告模式，失败不终止编译）

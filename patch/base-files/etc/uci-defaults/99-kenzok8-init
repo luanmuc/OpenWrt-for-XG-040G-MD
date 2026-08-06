@@ -23,6 +23,8 @@ SETUP_SCRIPT="/usr/share/kenzok8/setup.sh"
 SCRIPT_DIR="/usr/share/kenzok8"
 # hotplug 脚本路径
 HOTPLUG_SCRIPT="/etc/hotplug.d/iface/99-kenzok8"
+# init.d 服务路径
+INITD_SCRIPT="/etc/init.d/kenzok8"
 # 延迟执行时间（秒）- 等系统完全启动、网络可能就绪
 DELAY_SECONDS=30
 
@@ -37,6 +39,13 @@ fi
 # 确保 hotplug 脚本有执行权限
 if [ -f "$HOTPLUG_SCRIPT" ]; then
     chmod +x "$HOTPLUG_SCRIPT" 2>/dev/null || true
+fi
+
+# 确保 init.d 服务有执行权限并启用
+if [ -f "$INITD_SCRIPT" ]; then
+    chmod +x "$INITD_SCRIPT" 2>/dev/null || true
+    # 启用服务（开机自启）
+    "$INITD_SCRIPT" enable 2>/dev/null || true
 fi
 
 # 第二步：幂等检查 - 已成功配置过则直接退出
