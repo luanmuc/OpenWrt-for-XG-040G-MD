@@ -163,6 +163,12 @@ jobs:
       - name: Apply base-files patch
         run: cp -rv $GITHUB_WORKSPACE/patch/base-files/* openwrt/package/base-files/files/
           
+      - name: Apply cpufreq DTS patch
+        run: |
+          cd openwrt
+          chmod +x $GITHUB_WORKSPACE/scripts/patch-cpufreq-dts.sh
+          bash $GITHUB_WORKSPACE/scripts/patch-cpufreq-dts.sh
+          
       - name: Copy configuration and defconfig
         run: |
           cp -fv "${CONFIG_FILE}" openwrt/.config
