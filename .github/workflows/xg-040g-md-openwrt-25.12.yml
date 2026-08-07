@@ -163,6 +163,33 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
           bash $GITHUB_WORKSPACE/scripts/update-packages.sh
           
+      - name: Patch package-manager-call (fix JSON truncation)
+        run: |
+          cd openwrt
+          # 找到 luci-app-package-manager 中的 package-manager-call 文件
+          PM_CALL=$(find feeds/luci -name "package-manager-call" -path "*/usr/libexec/*" | head -n1)
+          if [ -z "$PM_CALL" ]; then
+            echo "WARN: not found in feeds/luci, trying package/feeds/luci"
+            PM_CALL=$(find package/feeds/luci -name "package-manager-call" -path "*/usr/libexec/*" | head -n1)
+          fi
+          if [ -z "$PM_CALL" ]; then
+            echo "ERROR: package-manager-call file not found"
+            exit 1
+          fi
+          echo "Found package-manager-call at: $PM_CALL"
+          # 修改 list-available 和 list-installed：--fields all → 精简字段
+          sed -i 's/--fields all/--fields name,version,description,architecture,size,depends,provides,install_date,origin,priority,section,url,license/g' "$PM_CALL"
+          echo "Fields reduction applied (--fields all → reduced fields)"
+          # 给 install/update/upgrade/remove 加上输出长度限制（64KB）
+          sed -i 's/cat \/tmp\/ipkg\.out/head -c 65536 \/tmp\/ipkg.out/g' "$PM_CALL"
+          sed -i 's/cat \/tmp\/ipkg\.err/head -c 65536 \/tmp\/ipkg.err/g' "$PM_CALL"
+          echo "Output length limit applied (head -c 65536)"
+          # 验证修改结果
+          echo "=== Verification: reduced fields count ==="
+          grep -c "name,version,description,architecture" "$PM_CALL" || echo "0"
+          echo "=== Verification: head -c 65536 count ==="
+          grep -c "head -c 65536" "$PM_CALL" || echo "0"
+          
       - name: Apply base-files patch
         run: cp -rv $GITHUB_WORKSPACE/patch/base-files/* openwrt/package/base-files/files/
           
