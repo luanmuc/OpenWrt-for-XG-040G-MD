@@ -196,6 +196,21 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/patch-cpufreq-dts.sh
           bash $GITHUB_WORKSPACE/scripts/patch-cpufreq-dts.sh
           
+      - name: Apply kernel patches (pcs.h compat, etc.)
+        run: |
+          cd openwrt
+          # 复制内核补丁到 airoha target 的 patches-6.12 目录
+          PATCH_DIR="target/linux/airoha/patches-6.12"
+          mkdir -p "$PATCH_DIR"
+          for patch in $GITHUB_WORKSPACE/patch/*.patch; do
+            if [ -f "$patch" ]; then
+              echo "Applying kernel patch: $(basename $patch)"
+              cp -v "$patch" "$PATCH_DIR/"
+            fi
+          done
+          echo "Kernel patches applied:"
+          ls -la "$PATCH_DIR/" | tail -10
+          
       - name: Hotfix rust llvm CI option
         working-directory: ./openwrt
         run: |

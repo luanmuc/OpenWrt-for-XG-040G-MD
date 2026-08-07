@@ -1,0 +1,17 @@
+--- /dev/null
++++ b/include/linux/pcs/pcs.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * Compatibility wrapper for linux/pcs/pcs.h
++ * In kernel 6.12+, PCS definitions have been integrated into linux/phylink.h
++ */
++#ifndef _LINUX_PCS_PCS_H_COMPAT
++#define _LINUX_PCS_PCS_H_COMPAT
++
++#include <linux/phylink.h>
++
++/* Backward compatibility alias */
++#define pcs_get_state phylink_pcs_get_state
++
++#endif /* _LINUX_PCS_PCS_H_COMPAT */
