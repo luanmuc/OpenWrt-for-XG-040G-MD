@@ -1,0 +1,42 @@
+--- a/drivers/net/ethernet/airoha/airoha_eth.c
++++ b/drivers/net/ethernet/airoha/airoha_eth.c
+@@ -200,21 +200,6 @@ static const struct phylink_mac_ops airoha_phylink_ops = {
+ 	.mac_link_down = airoha_mac_link_down,
+ };
+ 
+-static int airoha_fill_available_pcs(struct phylink_config *config,
+-				     struct phylink_pcs **available_pcs,
+-				     unsigned int num_possible_pcs)
+-{
+-	struct device *dev = config->dev;
+-
+-	return fwnode_phylink_pcs_parse(dev_fwnode(dev), available_pcs,
+-					&num_possible_pcs);
+-}
+-
+ static int airoha_setup_phylink(struct net_device *netdev)
+ {
+ 	struct airoha_gdm_dev *dev = netdev_priv(netdev);
+@@ -245,17 +230,6 @@ static int airoha_setup_phylink(struct net_device *netdev)
+ 		config->mac_capabilities = MAC_ASYM_PAUSE | MAC_SYM_PAUSE |
+ 					   MAC_10 | MAC_100 | MAC_1000 |
+ 					   MAC_2500FD | MAC_5000FD | MAC_10000FD;
+-
+-		err = fwnode_phylink_pcs_parse(dev_fwnode(config->dev), NULL,
+-					       &dev->phylink_config.num_available_pcs);
+-		if (err)
+-			return err;
+-
+-		config->fill_available_pcs = airoha_fill_available_pcs;
+ 
+ 		__set_bit(PHY_INTERFACE_MODE_SGMII,
+ 			  config->supported_interfaces);
+@@ -268,9 +242,6 @@ static int airoha_setup_phylink(struct net_device *netdev)
+ 		__set_bit(PHY_INTERFACE_MODE_USXGMII,
+ 			  config->supported_interfaces);
+ 
+-		phy_interface_copy(config->pcs_interfaces,
+-				   config->supported_interfaces);
+ 	}
+ 
+ 	phylink = phylink_create(config, of_fwnode_handle(np),
