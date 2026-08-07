@@ -178,7 +178,7 @@ jobs:
           fi
           echo "Found package-manager-call at: $PM_CALL"
           # 修改 list-available 和 list-installed：--fields all → 精简字段
-          sed -i 's/--fields all/--fields name,version,description,architecture,size,depends,provides,install_date,origin,priority,section,url,license/g' "$PM_CALL"
+          sed -i 's/--fields all/--fields name,version,description,arch,file-size,installed-size,depends,provides,status,origin,provider-priority,url,license/g' "$PM_CALL"
           echo "Fields reduction applied (--fields all → reduced fields)"
           # 给 install/update/upgrade/remove 加上输出长度限制（64KB）
           sed -i 's/cat \/tmp\/ipkg\.out/head -c 65536 \/tmp\/ipkg.out/g' "$PM_CALL"
