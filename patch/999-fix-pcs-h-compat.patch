@@ -1,6 +1,6 @@
 --- /dev/null
 +++ b/include/linux/pcs/pcs.h
-@@ -0,0 +1,15 @@
+@@ -0,0 +1,14 @@
 +/* SPDX-License-Identifier: GPL-2.0 */
 +/*
 + * Compatibility wrapper for linux/pcs/pcs.h
