@@ -81,7 +81,8 @@ jobs:
         run: |
           git clone --branch "$REPO_BRANCH" "$REPO_URL" openwrt
           cd openwrt
-          git checkout 9e612796cd57ee72f6b90048a89a841fd3108089
+          echo "Using latest openwrt-25.12 branch HEAD"
+          git log --oneline -1
 
       - name: Move build dirs to /mnt/openwrt
         run: |
@@ -188,6 +189,27 @@ jobs:
           grep -c "name,version,description,architecture" "$PM_CALL" || echo "0"
           echo "=== Verification: head -c 65536 count ==="
           grep -c "head -c 65536" "$PM_CALL" || echo "0"
+          
+      - name: Replace 310-10 patch (fix pcs.h compilation error)
+        run: |
+          PATCH_DIR="openwrt/target/linux/airoha/patches-6.12"
+          OUR_PATCH="$GITHUB_WORKSPACE/patch/airoha-fixes/310-10-net-airoha-add-phylink-support.patch"
+          
+          if [ -f "$OUR_PATCH" ] && [ -f "$PATCH_DIR/310-10-net-airoha-add-phylink-support.patch" ]; then
+            cp -v "$OUR_PATCH" "$PATCH_DIR/310-10-net-airoha-add-phylink-support.patch"
+            echo "310-10 patch replaced with modified version (mac_select_pcs API fix)"
+          else
+            echo "WARN: Could not replace 310-10 patch"
+            echo "  Our patch: $OUR_PATCH ($([ -f "$OUR_PATCH" ] && echo "exists" || echo "missing"))"
+            echo "  Target: $PATCH_DIR/310-10-net-airoha-add-phylink-support.patch ($([ -f "$PATCH_DIR/310-10-net-airoha-add-phylink-support.patch" ] && echo "exists" || echo "missing"))"
+          fi
+          
+          # Verify the replacement
+          if grep -q "pcs-airoha.h" "$PATCH_DIR/310-10-net-airoha-add-phylink-support.patch"; then
+            echo "PASS: 310-10 patch uses pcs-airoha.h (old API)"
+          else
+            echo "FAIL: 310-10 patch still uses pcs.h (new API)"
+          fi
           
       - name: Apply base-files patch
         run: cp -rv $GITHUB_WORKSPACE/patch/base-files/* openwrt/package/base-files/files/
