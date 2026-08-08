@@ -196,21 +196,21 @@ jobs:
           chmod +x $GITHUB_WORKSPACE/scripts/patch-cpufreq-dts.sh
           bash $GITHUB_WORKSPACE/scripts/patch-cpufreq-dts.sh
           
-      - name: Apply kernel patches (pcs.h compat, etc.)
+      - name: Apply kernel patches (phylink/PCS backport, etc.)
         run: |
           cd openwrt
           # 复制内核补丁到 airoha target 的 patches-6.12 目录
           PATCH_DIR="target/linux/airoha/patches-6.12"
           mkdir -p "$PATCH_DIR"
-          # 只复制 999 开头的自定义内核补丁（避免覆盖/冲突上游已有补丁）
-          for patch in $GITHUB_WORKSPACE/patch/999-*.patch; do
+          # 复制 300 开头的 phylink/PCS backport 补丁（确保在310系列之前应用）
+          for patch in $GITHUB_WORKSPACE/patch/300-*.patch; do
             if [ -f "$patch" ]; then
               echo "Applying kernel patch: $(basename $patch)"
               cp -v "$patch" "$PATCH_DIR/"
             fi
           done
           echo "Custom kernel patches applied:"
-          ls -la "$PATCH_DIR/" | grep 999- || echo "None"
+          ls -la "$PATCH_DIR/" | grep -E "^-.*300-" || echo "None"
           
       - name: Hotfix rust llvm CI option
         working-directory: ./openwrt

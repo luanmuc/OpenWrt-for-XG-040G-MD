@@ -1,0 +1,20 @@
+--- a/include/linux/pcs/pcs.h
++++ b/include/linux/pcs/pcs.h
+@@ -53,4 +53,17 @@ static inline int fwnode_phylink_pcs_parse(struct fwnode_handle *fwnode,
+ }
+ #endif
+ 
++/*
++ * netdev_from_priv - compatibility helper for 6.12 kernel
++ * Reverse of netdev_priv: get net_device pointer from private data pointer
++ *
++ * This function was introduced in later kernel versions and is used by
++ * airoha ethernet driver (v7.2 backport patches).
++ */
++static inline struct net_device *netdev_from_priv(void *priv)
++{
++	return (struct net_device *)((char *)priv -
++		ALIGN(sizeof(struct net_device), NETDEV_ALIGN));
++}
++
+ #endif /* __LINUX_PCS_H */
