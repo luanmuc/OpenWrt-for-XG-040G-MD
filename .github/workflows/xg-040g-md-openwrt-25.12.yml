@@ -79,7 +79,9 @@ jobs:
 
       - name: Clone OpenWrt source code (openwrt-25.12)
         run: |
-          git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" openwrt
+          git clone --branch "$REPO_BRANCH" "$REPO_URL" openwrt
+          cd openwrt
+          git checkout 9e612796cd57ee72f6b90048a89a841fd3108089
 
       - name: Move build dirs to /mnt/openwrt
         run: |
@@ -186,15 +188,6 @@ jobs:
           grep -c "name,version,description,architecture" "$PM_CALL" || echo "0"
           echo "=== Verification: head -c 65536 count ==="
           grep -c "head -c 65536" "$PM_CALL" || echo "0"
-          
-      - name: Replace airoha 310 patches with old version
-        run: |
-          # 删除上游新版本的310系列补丁
-          rm -f openwrt/target/linux/airoha/patches-6.12/310-*.patch
-          # 复制我们的旧版本补丁
-          cp -v patch/airoha-patches-6.12/310-*.patch openwrt/target/linux/airoha/patches-6.12/
-          # 验证补丁文件存在
-          ls -la openwrt/target/linux/airoha/patches-6.12/310-*.patch
           
       - name: Apply base-files patch
         run: cp -rv $GITHUB_WORKSPACE/patch/base-files/* openwrt/package/base-files/files/
