@@ -1,0 +1,92 @@
+#!/bin/sh
+# ============================================================
+# kenzok8 源配置 - uci-defaults 首次开机初始化脚本
+#
+# 功能：首次开机时初始化目录权限，并兜底触发一次源配置
+# 触发时机：系统首次启动时，uci-defaults 机制自动执行
+# 特性：执行一次后自动失效（uci-defaults 自动重命名为 .done）
+# 设计原则：
+#   1. 不阻塞开机：立即返回，实际工作放后台延迟执行
+#   2. 幂等安全：已完成则直接跳过
+#   3. 兜底保障：hotplug 没触发到时的备用方案
+#
+# 位置：/etc/uci-defaults/99-kenzok8-init
+# 说明：99 开头确保在其他初始化脚本之后执行
+# ============================================================
+
+# -------------------------- 配置区 --------------------------
+# 成功标记文件（持久化）
+DONE_MARK="/etc/kenzok8.done"
+# 主脚本路径
+SETUP_SCRIPT="/usr/share/kenzok8/setup.sh"
+# 脚本所在目录
+SCRIPT_DIR="/usr/share/kenzok8"
+# hotplug 脚本路径
+HOTPLUG_SCRIPT="/etc/hotplug.d/iface/99-kenzok8"
+# init.d 服务路径
+INITD_SCRIPT="/etc/init.d/kenzok8"
+# 延迟执行时间（秒）- 等系统完全启动、网络可能就绪
+DELAY_SECONDS=30
+
+# -------------------------- 主逻辑 --------------------------
+# 第一步：确保目录和权限正确
+# 编译时可能权限没带过来，这里做兜底修复
+if [ -d "$SCRIPT_DIR" ]; then
+    # 给主脚本加执行权限
+    chmod +x "$SETUP_SCRIPT" 2>/dev/null || true
+fi
+
+# 确保 hotplug 脚本有执行权限
+if [ -f "$HOTPLUG_SCRIPT" ]; then
+    chmod +x "$HOTPLUG_SCRIPT" 2>/dev/null || true
+fi
+
+# 确保 init.d 服务有执行权限并启用
+if [ -f "$INITD_SCRIPT" ]; then
+    chmod +x "$INITD_SCRIPT" 2>/dev/null || true
+    # 启用服务（开机自启）
+    "$INITD_SCRIPT" enable 2>/dev/null || true
+fi
+
+# 第二步：幂等检查 - 已成功配置过则直接退出
+if [ -f "$DONE_MARK" ]; then
+    # 已完成，直接退出
+    exit 0
+fi
+
+# 第三步：检查主脚本是否存在
+if [ ! -f "$SETUP_SCRIPT" ]; then
+    # 主脚本不存在，直接退出
+    exit 0
+fi
+
+# 第四步：后台延迟执行主脚本（兜底触发）
+# 关键点：
+#   1. 使用 ( ... ) & 放入子shell后台执行
+#   2. 延迟30秒，等系统完全启动、网络可能已经连上
+#   3. 本脚本立即返回，不阻塞 uci-defaults 流程
+#   4. uci-defaults 执行完会自动重命名本脚本，不会再跑
+(
+    # 延迟执行，等系统和网络都就绪
+    sleep "$DELAY_SECONDS"
+
+    # 二次确认标记（延迟期间可能已经被 hotplug 触发完成了）
+    if [ -f "$DONE_MARK" ]; then
+        exit 0
+    fi
+
+    # 执行主脚本
+    if [ -x "$SETUP_SCRIPT" ]; then
+        "$SETUP_SCRIPT"
+    else
+        # 没有执行权限的兜底方案
+        sh "$SETUP_SCRIPT"
+    fi
+
+    # 确保子shell也返回0
+    exit 0
+) &
+
+# 第五步：立即返回，绝不阻塞开机流程
+# uci-defaults 阻塞会导致开机变慢，必须立即返回
+exit 0

@@ -1,0 +1,63 @@
+#!/bin/sh /etc/rc.common
+# ============================================================
+# kenzok8 源配置 - init.d 兜底服务
+#
+# 功能：每次开机延迟执行源配置，确保源一定能加上
+# 触发时机：系统启动完成后（START=99，最后执行）
+# 设计原则：
+#   1. 不阻塞开机：立即返回，实际工作放后台延迟执行
+#   2. 幂等安全：已完成则直接跳过
+#   3. 多重保障：uci-defaults + hotplug + init.d 三重触发
+#
+# 位置：/etc/init.d/kenzok8
+# 说明：START=99 确保在所有服务启动完成后执行
+# ============================================================
+
+START=99
+USE_PROCD=1
+
+# 成功标记文件
+DONE_MARK="/etc/kenzok8.done"
+# 主脚本路径
+SETUP_SCRIPT="/usr/share/kenzok8/setup.sh"
+# 延迟执行时间（秒）- 等系统和网络完全就绪
+DELAY_SECONDS=60
+
+start_service() {
+    # 幂等检查 - 已成功配置过则直接退出
+    if [ -f "$DONE_MARK" ]; then
+        return 0
+    fi
+
+    # 检查主脚本是否存在
+    if [ ! -f "$SETUP_SCRIPT" ]; then
+        return 0
+    fi
+
+    # 后台延迟执行主脚本
+    # 使用 procd 或直接后台运行
+    (
+        sleep "$DELAY_SECONDS"
+        # 二次确认标记（延迟期间可能已经被其他触发源完成了）
+        if [ -f "$DONE_MARK" ]; then
+            exit 0
+        fi
+        # 执行主脚本
+        if [ -x "$SETUP_SCRIPT" ]; then
+            "$SETUP_SCRIPT"
+        else
+            sh "$SETUP_SCRIPT"
+        fi
+        exit 0
+    ) &
+}
+
+stop_service() {
+    # 无需停止，这是一次性触发服务
+    return 0
+}
+
+service_triggers() {
+    # 不设置任何触发器，只在开机时执行一次
+    return 0
+}

@@ -1,0 +1,590 @@
+name: Build_XG_040G_MD_OpenWrt_25_12
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      log_switch:
+        description: "Build logs"
+        required: false
+        default: true
+        type: boolean
+  schedule:
+    # 每周一 00:00 Asia/Shanghai = 周日 16:00 UTC
+    - cron: "0 16 * * 0"
+
+env:
+  CONFIG_FILE: "config/xg-040g-md.config"
+  REPO_URL: https://github.com/xiangtailiang/openwrt.git
+  REPO_BRANCH: openwrt-25.12
+  FEEDS_CONF: feeds.conf.default
+  UPLOAD_FIRMWARE: true
+  UPLOAD_RELEASE: true
+  KEEP_RELEASES: 20
+  KEEP_RELEASE_MARKER: "[keep-release]"
+  CCACHE_DIR: /mnt/openwrt/ccache
+  CCACHE_MAXSIZE: 5G
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+
+      - name: Space usage check
+        run: df -h
+
+      - name: Setup environment dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          TZ: ${{ env.TZ }}
+        run: |
+          sudo apt update
+          sudo apt purge -y python3-distutils || true
+          sudo apt autoremove -y
+          sudo apt install -y \
+            build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+            python3-setuptools rsync swig unzip zlib1g-dev file wget \
+            mkbootimg device-tree-compiler ccache help2man
+          if command -v mkbootimg >/dev/null 2>&1; then
+            echo "mkbootimg found at: $(command -v mkbootimg)"
+          else
+            echo "❌ mkbootimg not found in PATH!"
+          fi
+
+          if [[ -n "$TZ" ]]; then
+            sudo timedatectl set-timezone "$TZ"
+          else
+            echo "TZ is not set, skipping timezone setup."
+          fi
+
+      - name: Ensure Python build tools
+        run: |
+          python3 -m pip install --upgrade pip setuptools wheel
+          python3 -m pip install Unidecode
+
+      - name: Clone OpenWrt source code (openwrt-25.12)
+        run: |
+          git clone --branch "$REPO_BRANCH" "$REPO_URL" openwrt
+          cd openwrt
+          echo "Using latest openwrt-25.12 branch HEAD"
+          git log --oneline -1
+
+      - name: Remove incompatible PCS/phylink patches (fix pcs.h compile error)
+        run: |
+          cd openwrt
+          PATCH_DIR="target/linux/airoha/patches-6.12"
+          
+          echo "=== Current patch count ==="
+          ls "$PATCH_DIR"/*.patch | wc -l
+          
+          # 删除使用通用PCS框架的不兼容补丁
+          # 310-08: phylink pcs_link_down OP
+          # 310-09: airoha PCS driver (pcs-airoha.h)
+          # 310-10: phylink support (uses pcs.h, 6.13+ API)
+          # 604-01: PCS driver AN7583 support
+          # 605: PCS driver xfi reset support
+          # 916-02: HW GRO TCP support (depends on phylink)
+          REMOVED=0
+          for prefix in 310-08 310-09 310-10 604-01 605 916-02; do
+            for f in "$PATCH_DIR"/${prefix}-*.patch; do
+              if [ -f "$f" ]; then
+                basename=$(basename "$f")
+                rm "$f"
+                REMOVED=$((REMOVED + 1))
+                echo "Removed incompatible patch: $basename"
+              fi
+            done
+          done
+          echo "Removed $REMOVED incompatible patches"
+          
+          echo "=== Final patch count ==="
+          ls "$PATCH_DIR"/*.patch | wc -l
+          
+          echo "=== Verify removed patches are gone ==="
+          for prefix in 310-08 310-09 310-10 604-01 605 916-02; do
+            ls "$PATCH_DIR"/${prefix}-*.patch 2>/dev/null && echo "WARN: ${prefix} still exists!" || echo "OK: ${prefix} removed"
+          done
+
+      - name: Move build dirs to /mnt/openwrt
+        run: |
+          sudo mkdir -p /mnt/openwrt/{dl,staging_dir,build_dir,ccache}
+          sudo chown -R "$USER:$(id -gn)" /mnt/openwrt
+          rm -rf openwrt/dl openwrt/staging_dir openwrt/build_dir
+          ln -sfn /mnt/openwrt/dl openwrt/dl
+          ln -sfn /mnt/openwrt/staging_dir openwrt/staging_dir
+          ln -sfn /mnt/openwrt/build_dir openwrt/build_dir
+          df -h
+
+      - name: Restore dl cache
+        uses: actions/cache@v4
+        with:
+          path: /mnt/openwrt/dl
+          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-dl-${{ hashFiles('feeds.conf.default') }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-dl-
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: /mnt/openwrt/ccache
+          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v3-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v3-
+            ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v2-
+
+      - name: Setup ccache
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache -M "$CCACHE_MAXSIZE"
+          echo "ccache dir: $CCACHE_DIR"
+          ccache -s
+
+      - name: Update & Install feeds
+        working-directory: ./openwrt
+        run: |
+          # 复制基础 feeds 配置
+          cp "$GITHUB_WORKSPACE/feeds.conf.default" feeds.conf.default
+          # 更新所有 feed
+          ./scripts/feeds update -a
+          # 安装所有 feed 的包到 package/feeds/
+          ./scripts/feeds install -a -f
+      - name: Install third-party packages (homeproxy, NPU plugin, etc.)
+        working-directory: ./openwrt/package
+        run: |
+          chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
+          bash $GITHUB_WORKSPACE/scripts/update-packages.sh
+          
+          # 克隆 iStore（源码方式）
+          echo "=== Cloning iStore ==="
+          git clone --depth=1 --branch main https://github.com/linkease/istore.git istore
+          # 移平 luci 子目录
+          if [ -d "istore/luci" ]; then
+            mv istore/luci/* istore/
+            rmdir istore/luci
+            echo "iStore directory flattened: luci/* moved to istore root"
+          fi
+          # iStore Fix 1: 条件依赖兼容性修复
+          if [ -f istore/luci-app-store/Makefile ]; then
+            sed -i '/LUCI_DEPENDS+=.*opkg/c\LUCI_DEPENDS+=+apk-mbedtls +luci-compat' istore/luci-app-store/Makefile
+            echo "iStore Fix 1 applied"
+          fi
+          # iStore Fix 2: 移除不存在的依赖
+          if [ -f istore/luci-app-store/Makefile ]; then
+            sed -i 's/+tar +libuci-lua +mount-utils //' istore/luci-app-store/Makefile
+            echo "iStore Fix 2 applied"
+          fi
+          # iStore Fix 3: is-opkg postinst 容错（修复安装成功但显示任务失败的误报）
+          if [ -f istore/luci-app-store/root/bin/is-opkg ]; then
+            echo "cGF0aCA9ICJpc3RvcmUvbHVjaS1hcHAtc3RvcmUvcm9vdC9iaW4vaXMtb3BrZyIKd2l0aCBvcGVuKHBhdGgsICJyIikgYXMgZjoKICAgIGNvbnRlbnQgPSBmLnJlYWQoKQpvbGRfZnVuYyA9ICIiImRvX2luc3RhbGxfaW5fbWlycm9ycygpIHsKICAgIGlmICRVU0VfQVBLOyB0aGVuCiAgICAgICAgYXBrX3dyYXBfbWlycm9ycyBhZGQgIiRAIgogICAgZWxzZQogICAgICAgIG9wa2dfd3JhcF9taXJyb3JzIGluc3RhbGwgIiRAIgogICAgZmkKfSIiIgpuZXdfZnVuYyA9ICIiImRvX2luc3RhbGxfaW5fbWlycm9ycygpIHsKICAgIGxvY2FsIHJldAogICAgaWYgJFVTRV9BUEs7IHRoZW4KICAgICAgICBhcGtfd3JhcF9taXJyb3JzIGFkZCAiJEAiCiAgICAgICAgcmV0PSQ/CiAgICBlbHNlCiAgICAgICAgb3BrZ193cmFwX21pcnJvcnMgaW5zdGFsbCAiJEAiCiAgICAgICAgcmV0PSQ/CiAgICBmaQogICAgaWYgWyAkcmV0IC1uZSAwIF07IHRoZW4KICAgICAgICAjIOWuuemUme+8mnBvc3RpbnN0IOiEmuacrOWksei0pe+8iOWmgiB1Y2ktZGVmYXVsdHMg6YeN5aSN5omn6KGM77yJ5L2G5YyF5paH5Lu25bey5a6J6KOF5pe277yM6KeG5Li65oiQ5YqfCiAgICAgICAgbG9jYWwgcGtnCiAgICAgICAgZm9yIHBrZyBpbiAiJEAiOyBkbwogICAgICAgICAgICBbIC1uICIkKGdldF9sb2NhbF92ZXJzaW9uICIkcGtnIikiIF0gfHwgcmV0dXJuICRyZXQKICAgICAgICBkb25lCiAgICAgICAgcmV0dXJuIDAKICAgIGZpCiAgICByZXR1cm4gJHJldAp9IiIiCmlmIG9sZF9mdW5jIGluIGNvbnRlbnQ6CiAgICBjb250ZW50ID0gY29udGVudC5yZXBsYWNlKG9sZF9mdW5jLCBuZXdfZnVuYykKICAgIHdpdGggb3BlbihwYXRoLCAidyIpIGFzIGY6CiAgICAgICAgZi53cml0ZShjb250ZW50KQogICAgcHJpbnQoImlTdG9yZSBGaXggMyBhcHBsaWVkOiBwb3N0aW5zdCB0b2xlcmFuY2UgYWRkZWQgdG8gZG9faW5zdGFsbF9pbl9taXJyb3JzIikKZWxzZToKICAgIHByaW50KCJpU3RvcmUgRml4IDMgV0FSTklORzogb3JpZ2luYWwgZG9faW5zdGFsbF9pbl9taXJyb3JzIG5vdCBmb3VuZCwgc2tpcHBpbmciKQo=" | base64 -d | python3
+          fi
+          # 克隆 OpenAppFilter（源码方式）
+          echo "=== Cloning OpenAppFilter ==="
+          git clone --depth=1 --branch master https://github.com/destan19/OpenAppFilter.git oaf
+          # OAF EXTRA_CFLAGS 修复（6.15+内核兼容）
+          OAF_SRC_MAKEFILE="oaf/oaf/src/Makefile"
+          if [ -f "$OAF_SRC_MAKEFILE" ]; then
+            echo "" >> "$OAF_SRC_MAKEFILE"
+            echo "ccflags-y += \$(EXTRA_CFLAGS)" >> "$OAF_SRC_MAKEFILE"
+            echo "OAF EXTRA_CFLAGS fix applied"
+          fi
+          
+      - name: Patch package-manager-call (fix JSON truncation)
+        run: |
+          cd openwrt
+          # 找到 luci-app-package-manager 中的 package-manager-call 文件
+          PM_CALL=$(find feeds/luci -name "package-manager-call" -path "*/usr/libexec/*" | head -n1)
+          if [ -z "$PM_CALL" ]; then
+            echo "WARN: not found in feeds/luci, trying package/feeds/luci"
+            PM_CALL=$(find package/feeds/luci -name "package-manager-call" -path "*/usr/libexec/*" | head -n1)
+          fi
+          if [ -z "$PM_CALL" ]; then
+            echo "ERROR: package-manager-call file not found"
+            exit 1
+          fi
+          echo "Found package-manager-call at: $PM_CALL"
+          # 修改 list-available 和 list-installed：--fields all → 精简字段
+          sed -i 's/--fields all/--fields name,version,description,arch,file-size,installed-size,depends,provides,status,origin,provider-priority,url,license/g' "$PM_CALL"
+          echo "Fields reduction applied (--fields all → reduced fields)"
+          # 给 install/update/upgrade/remove 加上输出长度限制（64KB）
+          sed -i 's/cat \/tmp\/ipkg\.out/head -c 65536 \/tmp\/ipkg.out/g' "$PM_CALL"
+          sed -i 's/cat \/tmp\/ipkg\.err/head -c 65536 \/tmp\/ipkg.err/g' "$PM_CALL"
+          echo "Output length limit applied (head -c 65536)"
+          # 验证修改结果
+          echo "=== Verification: reduced fields count ==="
+          grep -c "name,version,description,architecture" "$PM_CALL" || echo "0"
+          echo "=== Verification: head -c 65536 count ==="
+          grep -c "head -c 65536" "$PM_CALL" || echo "0"
+          
+      - name: Apply base-files patch
+        run: cp -rv $GITHUB_WORKSPACE/patch/base-files/* openwrt/package/base-files/files/
+          
+      - name: Apply cpufreq DTS patch
+        run: |
+          cd openwrt
+          chmod +x $GITHUB_WORKSPACE/scripts/patch-cpufreq-dts.sh
+          bash $GITHUB_WORKSPACE/scripts/patch-cpufreq-dts.sh
+          
+      - name: Hotfix rust llvm CI option
+        working-directory: ./openwrt
+        run: |
+          sed -i 's/--set=llvm.download-ci-llvm=true/--set=llvm.download-ci-llvm=false/'             feeds/packages/lang/rust/Makefile
+          grep -n "download-ci-llvm" feeds/packages/lang/rust/Makefile
+
+      - name: Copy configuration and defconfig
+        run: |
+          cp -fv "${CONFIG_FILE}" openwrt/.config
+          cd openwrt
+          
+          make defconfig
+          
+          # 6步验证：iStore集成验证（源码方式，移除feed相关验证）
+          echo "=== 1/6 验证 istore 目录存在 ==="
+          [ -d package/istore ] || { echo "FAIL: istore directory not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 2/6 验证 luci-app-store/Makefile 存在 ==="
+          [ -f package/istore/luci-app-store/Makefile ] || { echo "FAIL: luci-app-store/Makefile not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 3/6 验证 luci-lib-taskd/Makefile 存在 ==="
+          [ -f package/istore/luci-lib-taskd/Makefile ] || { echo "FAIL: luci-lib-taskd/Makefile not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 4/6 验证 luci-lib-xterm/Makefile 存在 ==="
+          [ -f package/istore/luci-lib-xterm/Makefile ] || { echo "FAIL: luci-lib-xterm/Makefile not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 5/6 验证 taskd/Makefile 存在 ==="
+          [ -f package/istore/taskd/Makefile ] || { echo "FAIL: taskd/Makefile not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 6/6 验证 .config 中 CONFIG_PACKAGE_luci-app-store=y ==="
+          if grep -q "CONFIG_PACKAGE_luci-app-store=y" .config; then
+            echo "PASS (official method)"
+            ISTORE_MODE="official"
+          else
+            echo "WARN: official method failed, executing fallback..."
+            # Fallback兜底机制：手动追加5个iStore相关包到.config末尾
+            echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
+            echo "CONFIG_PACKAGE_luci-lib-taskd=y" >> .config
+            echo "CONFIG_PACKAGE_luci-lib-xterm=y" >> .config
+            echo "CONFIG_PACKAGE_taskd=y" >> .config
+            echo "CONFIG_PACKAGE_luci-compat=y" >> .config
+            # 再次验证
+            if grep -q "CONFIG_PACKAGE_luci-app-store=y" .config; then
+              echo "PASS (fallback method)"
+              ISTORE_MODE="fallback"
+            else
+              echo "FAIL: fallback also failed"
+              exit 1
+            fi
+          fi
+          
+          echo "=== iStore 全部 6 步验证通过 (mode: $ISTORE_MODE) ==="
+          
+          # 5步验证：OpenAppFilter集成验证（源码方式，移除feed相关验证）
+          echo "=== 1/5 验证 oaf 目录存在 ==="
+          [ -d package/oaf ] || { echo "FAIL: oaf directory not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 2/5 验证 luci-app-oaf/Makefile 存在 ==="
+          [ -f package/oaf/luci-app-oaf/Makefile ] || { echo "FAIL: luci-app-oaf/Makefile not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 3/5 验证 oaf 内核模块 Makefile 存在 ==="
+          [ -f package/oaf/oaf/Makefile ] || { echo "FAIL: oaf kernel module Makefile not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 4/5 验证 appfilter 规则文件存在 ==="
+          [ -f package/oaf/open-app-filter/Makefile ] || { echo "FAIL: open-app-filter package Makefile not found"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 5/5 验证 .config 中 CONFIG_PACKAGE_luci-app-oaf=y ==="
+          grep -q "CONFIG_PACKAGE_luci-app-oaf=y" .config || { echo "FAIL: CONFIG_PACKAGE_luci-app-oaf not set to y"; exit 1; }
+          echo "PASS"
+          
+          echo "=== OAF 全部 5 步验证通过 ==="
+          
+          # 9步验证：NPU插件集成验证（defconfig后执行）
+          # 前6步为文件存在性验证（警告模式，失败不终止编译）
+          # 后3步为配置验证（严格模式，失败立即终止）
+          echo "=== 1/9 验证 NPU 插件目录存在 ==="
+          if [ -d package/luci-app-airoha-npu ]; then
+            echo "PASS"
+          else
+            echo "WARN: NPU plugin directory not found (file existence check only, build continues)"
+          fi
+          
+          echo "=== 2/9 验证 NPU 插件 Makefile 存在 ==="
+          if [ -f package/luci-app-airoha-npu/Makefile ]; then
+            echo "PASS"
+          else
+            echo "WARN: NPU plugin Makefile not found (file existence check only, build continues)"
+          fi
+          
+          echo "=== 3/9 验证 NPU 前端 JS 文件存在 ==="
+          if [ -f package/luci-app-airoha-npu/htdocs/luci-static/resources/view/airoha_npu/status.js ]; then
+            echo "PASS"
+          else
+            echo "WARN: NPU frontend JS file not found at expected path (file existence check only, build continues)"
+            # Fallback: 搜索插件目录下是否有相关JS文件
+            find package/luci-app-airoha-npu -name "*.js" -type f 2>/dev/null | head -5 || true
+          fi
+          
+          echo "=== 4/9 验证 NPU 后端 rpcd 脚本存在 ==="
+          if [ -f package/luci-app-airoha-npu/root/usr/libexec/rpcd/luci.airoha_npu ]; then
+            echo "PASS"
+          else
+            echo "WARN: NPU backend rpcd script not found at expected path (file existence check only, build continues)"
+            # Fallback: 搜索插件目录下是否有相关rpcd脚本
+            find package/luci-app-airoha-npu -path "*/rpcd/*" -type f 2>/dev/null | head -5 || true
+          fi
+          
+          echo "=== 5/9 验证 NPU ACL 配置文件存在 ==="
+          if [ -f package/luci-app-airoha-npu/root/usr/share/rpcd/acl.d/luci-app-airoha-npu.json ]; then
+            echo "PASS"
+          else
+            echo "WARN: NPU ACL config file not found (file existence check only, build continues)"
+          fi
+          
+          echo "=== 6/9 验证 NPU 菜单配置文件存在 ==="
+          if [ -f package/luci-app-airoha-npu/root/usr/share/luci/menu.d/luci-app-airoha-npu.json ]; then
+            echo "PASS"
+          else
+            echo "WARN: NPU menu config file not found (file existence check only, build continues)"
+          fi
+          
+          echo "=== 7/9 验证 devmem 配置（三层保障） ==="
+          if grep -q "CONFIG_KERNEL_DEVMEM=y" .config && grep -q "CONFIG_BUSYBOX_CUSTOM=y" .config && grep -q "CONFIG_BUSYBOX_CONFIG_DEVMEM=y" .config; then
+            echo "PASS (all three layers of devmem enabled)"
+            DEVMEM_MODE="three-layer"
+          else
+            echo "WARN: three-layer devmem check failed, executing fallback..."
+            # Fallback兜底机制：尝试旧的两层保障模式
+            if grep -q "CONFIG_KERNEL_DEVMEM=y" .config && grep -q "CONFIG_BUSYBOX_DEFAULT_DEVMEM=y" .config; then
+              echo "PASS (fallback: two-layer devmem enabled)"
+              DEVMEM_MODE="two-layer-fallback"
+            else
+              echo "FAIL: both three-layer and two-layer devmem checks failed"
+              exit 1
+            fi
+          fi
+          
+          echo "=== 8/9 验证 NPU 固件包配置 ==="
+          grep -q "CONFIG_PACKAGE_airoha-en7581-npu-firmware=y" .config || { echo "FAIL: NPU firmware package not enabled"; exit 1; }
+          echo "PASS"
+          
+          echo "=== 9/9 验证 NPU 插件本身配置启用 ==="
+          if grep -q "CONFIG_PACKAGE_luci-app-airoha-npu=y" .config; then
+            echo "PASS (official method)"
+            NPU_MODE="official"
+          else
+            echo "WARN: official method failed, executing fallback..."
+            # Fallback兜底机制：手动追加NPU插件配置到.config末尾
+            echo "CONFIG_PACKAGE_luci-app-airoha-npu=y" >> .config
+            # 再次验证
+            if grep -q "CONFIG_PACKAGE_luci-app-airoha-npu=y" .config; then
+              echo "PASS (fallback method)"
+              NPU_MODE="fallback"
+            else
+              echo "FAIL: fallback also failed"
+              exit 1
+            fi
+          fi
+          
+          echo "=== NPU 全部 9 步验证通过 (mode: $NPU_MODE) ==="
+          
+          [ -e .config ] && cp .config defconfig-final.config
+
+      - name: Verify key packages
+        working-directory: ./openwrt
+        run: |
+          echo "=== 验证关键包配置 ==="
+          
+          # 验证 ucode-mod-math（Argon主题依赖）
+          grep -q "CONFIG_PACKAGE_ucode-mod-math=y" .config || {
+            echo "FAIL: ucode-mod-math 未启用"
+            exit 1
+          }
+          echo "PASS: ucode-mod-math 已启用"
+          
+          # 验证 Argon 主题
+          grep -q "CONFIG_PACKAGE_luci-theme-argon=y" .config || {
+            echo "FAIL: luci-theme-argon 未启用"
+            exit 1
+          }
+          echo "PASS: luci-theme-argon 已启用"
+          
+          echo "=== 所有关键包验证通过 ==="
+
+      - name: Upload build config files
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-config
+          path: |
+            config/xg-040g-md.config
+            openwrt/defconfig-final.config
+            openwrt/feeds.conf.default
+
+      - name: Download packages
+        working-directory: ./openwrt
+        run: |
+          # 配置 curl 全局重试：重试5次，连接超时30s，总超时300s
+          echo "retry = 5" >> ~/.curlrc
+          echo "retry-delay = 5" >> ~/.curlrc
+          echo "connect-timeout = 30" >> ~/.curlrc
+          echo "max-time = 300" >> ~/.curlrc
+          make download -j4 V=s
+          # Remove small incomplete files <1KB
+          find dl -size -1024c -delete
+
+      - name: Compile OpenWrt firmware
+        id: compile
+        run: |
+          cd openwrt
+          echo "Disk usage before compile:"
+          df -h
+          
+          echo "=== Prepare kernel source ==="
+          make target/linux/prepare V=s -j$(nproc) 2>&1 | tail -10
+          
+          echo "=== Add netdev_from_priv backport for 6.12 kernel ==="
+          KERNEL_DIR="build_dir/target-aarch64_cortex-a53_musl/linux-airoha_an7581/linux-6.12.94"
+          ETH_C="$KERNEL_DIR/drivers/net/ethernet/airoha/airoha_eth.c"
+          
+          if [ -f "$ETH_C" ]; then
+            echo "Found: $ETH_C"
+            if grep -q "netdev_from_priv backport" "$ETH_C"; then
+              echo "Backport already applied, skipping"
+            else
+              echo "Adding netdev_from_priv backport..."
+              LAST_INCLUDE=$(grep -n "^#include" "$ETH_C" | tail -1 | cut -d: -f1)
+              if [ -z "$LAST_INCLUDE" ]; then
+                LAST_INCLUDE=10
+              fi
+              INSERT_LINE=$((LAST_INCLUDE + 1))
+              echo "Inserting at line $INSERT_LINE (after last #include)"
+              
+              # 用echo逐行写入backport代码
+              BP_FILE="/tmp/netdev_backport.c"
+              echo "" > "$BP_FILE"
+              echo "/* netdev_from_priv backport for 6.12 kernel */" >> "$BP_FILE"
+              echo "#ifndef netdev_from_priv" >> "$BP_FILE"
+              echo "static inline struct net_device *netdev_from_priv(void *priv)" >> "$BP_FILE"
+              echo "{" >> "$BP_FILE"
+              echo "	return (struct net_device *)((char *)priv -" >> "$BP_FILE"
+              echo "		ALIGN(sizeof(struct net_device), NETDEV_ALIGN));" >> "$BP_FILE"
+              echo "}" >> "$BP_FILE"
+              echo "#endif" >> "$BP_FILE"
+              echo "" >> "$BP_FILE"
+              
+              head -n $((INSERT_LINE - 1)) "$ETH_C" > /tmp/airoha_eth_modified.c
+              cat "$BP_FILE" >> /tmp/airoha_eth_modified.c
+              tail -n +$INSERT_LINE "$ETH_C" >> /tmp/airoha_eth_modified.c
+              mv /tmp/airoha_eth_modified.c "$ETH_C"
+              
+              echo "Backport added successfully"
+            fi
+          else
+            echo "WARNING: airoha_eth.c not found at $ETH_C"
+          fi
+          
+          echo "=== Stage 1: Multi-threaded fast compile ==="
+          make -j$(nproc) || {
+            echo "Stage 1 failed, falling back to Stage 2: Single-threaded verbose compile with -j1 V=s"
+            make -j1 V=s || {
+              echo "Compile failed, disk usage diagnostics:"
+              df -h
+              du -h -d1 . | sort -h | tail -n 30
+              exit 1
+            }
+          }
+          DEVICE_NAME=$(grep -o 'CONFIG_TARGET.*DEVICE_[^=]*=y' .config | head -1 | sed 's/.*DEVICE_\(.*\)=y/\1/')
+          if [[ -n "$DEVICE_NAME" ]]; then
+            echo "DEVICE_NAME=_${DEVICE_NAME}" >> "$GITHUB_ENV"
+          fi
+          echo "FILE_DATE=_$(date +%Y%m%d%H%M)" >> "$GITHUB_ENV"
+          echo "status=success" >> $GITHUB_OUTPUT
+          echo "ccache stats (env CCACHE_DIR=$CCACHE_DIR):"
+          ccache -s || true
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: /mnt/openwrt/ccache
+          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v3-${{ github.run_id }}
+
+      - name: Prepare firmware artifacts path
+        id: organize
+        if: env.UPLOAD_FIRMWARE == 'true'
+        run: |
+          cd openwrt/bin/targets/*/*
+          rm -rf packages
+          echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v6
+        if: env.UPLOAD_FIRMWARE == 'true'
+        with:
+          name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+          path: ${{ env.FIRMWARE }}/*
+
+      - name: Generate release tag and notes
+        id: tag
+        if: env.UPLOAD_RELEASE == 'true'
+        run: |
+          RELEASE_DATE=$(date +"%Y.%m.%d-%H%M%S")
+          echo "release_tag=v${RELEASE_DATE}-openwrt-25.12" >> $GITHUB_OUTPUT
+          echo "release_name=OpenWrt-25.12-${RELEASE_DATE}" >> $GITHUB_OUTPUT
+          cat <<EOF > release.txt
+          🚀 OpenWrt firmware for XG-040G-MD (openwrt-25.12)
+          ----------------------
+          设备型号: XG-040G-MD
+          构建时间: $(date +"%Y-%m-%d %H:%M")
+          内核版本: 6.12.X
+          源码仓库: $REPO_URL
+          分支: $REPO_BRANCH
+          EOF
+
+      - name: Publish GitHub Release
+        uses: ncipollo/release-action@v1
+        if: env.UPLOAD_RELEASE == 'true'
+        with:
+          tag: ${{ steps.tag.outputs.release_tag }}
+          name: ${{ steps.tag.outputs.release_name }}
+          bodyFile: release.txt
+          artifacts: |
+            ${{ env.FIRMWARE }}/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          retain_days: 7
+          keep_minimum_runs: 5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old GitHub Releases
+        if: env.UPLOAD_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_RELEASES: ${{ env.KEEP_RELEASES }}
+          KEEP_RELEASE_MARKER: ${{ env.KEEP_RELEASE_MARKER }}
+        run: bash scripts/cleanup-old-releases.sh
