@@ -159,6 +159,12 @@ jobs:
               echo "ccflags-y += \$(EXTRA_CFLAGS)" >> "$OAF_SRC_MAKEFILE"
               echo "OAF EXTRA_CFLAGS fix applied"
           fi
+          # 克隆 FastNet 源码到 package（网络测速插件）
+          git clone --depth=1 --branch main https://github.com/xuanranran/openwrt-package.git fastnet-tmp
+          mv fastnet-tmp/fastnet fastnet
+          mv fastnet-tmp/luci-app-fastnet luci-app-fastnet
+          rm -rf fastnet-tmp
+          echo "FastNet cloned: fastnet + luci-app-fastnet"
           # 执行其他第三方包更新
           chmod +x $GITHUB_WORKSPACE/scripts/update-packages.sh
           bash $GITHUB_WORKSPACE/scripts/update-packages.sh
