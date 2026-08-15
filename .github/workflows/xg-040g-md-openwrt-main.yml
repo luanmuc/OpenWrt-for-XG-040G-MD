@@ -160,7 +160,7 @@ jobs:
               echo "OAF EXTRA_CFLAGS fix applied"
           fi
           # 克隆 FastNet 源码到 package（网络测速插件）
-          git clone --depth=1 --branch main https://github.com/xuanranran/openwrt-package.git fastnet-tmp
+          git clone --depth=1 --branch master https://github.com/xuanranran/openwrt-package.git fastnet-tmp
           mv fastnet-tmp/fastnet fastnet
           mv fastnet-tmp/luci-app-fastnet luci-app-fastnet
           rm -rf fastnet-tmp
