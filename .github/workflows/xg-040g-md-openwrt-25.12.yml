@@ -84,42 +84,6 @@ jobs:
           echo "Using latest openwrt-25.12 branch HEAD"
           git log --oneline -1
 
-      - name: Remove incompatible PCS/phylink patches (fix pcs.h compile error)
-        run: |
-          cd openwrt
-          PATCH_DIR="target/linux/airoha/patches-6.12"
-          
-          echo "=== Current patch count ==="
-          ls "$PATCH_DIR"/*.patch | wc -l
-          
-          # 删除使用通用PCS框架的不兼容补丁
-          # 310-08: phylink pcs_link_down OP
-          # 310-09: airoha PCS driver (pcs-airoha.h)
-          # 310-10: phylink support (uses pcs.h, 6.13+ API)
-          # 604-01: PCS driver AN7583 support
-          # 605: PCS driver xfi reset support
-          # 916-02: HW GRO TCP support (depends on phylink)
-          REMOVED=0
-          for prefix in 310-08 310-09 310-10 604-01 605 916-02; do
-            for f in "$PATCH_DIR"/${prefix}-*.patch; do
-              if [ -f "$f" ]; then
-                basename=$(basename "$f")
-                rm "$f"
-                REMOVED=$((REMOVED + 1))
-                echo "Removed incompatible patch: $basename"
-              fi
-            done
-          done
-          echo "Removed $REMOVED incompatible patches"
-          
-          echo "=== Final patch count ==="
-          ls "$PATCH_DIR"/*.patch | wc -l
-          
-          echo "=== Verify removed patches are gone ==="
-          for prefix in 310-08 310-09 310-10 604-01 605 916-02; do
-            ls "$PATCH_DIR"/${prefix}-*.patch 2>/dev/null && echo "WARN: ${prefix} still exists!" || echo "OK: ${prefix} removed"
-          done
-
       - name: Move build dirs to /mnt/openwrt
         run: |
           sudo mkdir -p /mnt/openwrt/{dl,staging_dir,build_dir,ccache}
@@ -469,47 +433,6 @@ jobs:
           
           echo "=== Prepare kernel source ==="
           make target/linux/prepare V=s -j$(nproc) 2>&1 | tail -10
-          
-          echo "=== Add netdev_from_priv backport for 6.12 kernel ==="
-          KERNEL_DIR="build_dir/target-aarch64_cortex-a53_musl/linux-airoha_an7581/linux-6.12.94"
-          ETH_C="$KERNEL_DIR/drivers/net/ethernet/airoha/airoha_eth.c"
-          
-          if [ -f "$ETH_C" ]; then
-            echo "Found: $ETH_C"
-            if grep -q "netdev_from_priv backport" "$ETH_C"; then
-              echo "Backport already applied, skipping"
-            else
-              echo "Adding netdev_from_priv backport..."
-              LAST_INCLUDE=$(grep -n "^#include" "$ETH_C" | tail -1 | cut -d: -f1)
-              if [ -z "$LAST_INCLUDE" ]; then
-                LAST_INCLUDE=10
-              fi
-              INSERT_LINE=$((LAST_INCLUDE + 1))
-              echo "Inserting at line $INSERT_LINE (after last #include)"
-              
-              # 用echo逐行写入backport代码
-              BP_FILE="/tmp/netdev_backport.c"
-              echo "" > "$BP_FILE"
-              echo "/* netdev_from_priv backport for 6.12 kernel */" >> "$BP_FILE"
-              echo "#ifndef netdev_from_priv" >> "$BP_FILE"
-              echo "static inline struct net_device *netdev_from_priv(void *priv)" >> "$BP_FILE"
-              echo "{" >> "$BP_FILE"
-              echo "	return (struct net_device *)((char *)priv -" >> "$BP_FILE"
-              echo "		ALIGN(sizeof(struct net_device), NETDEV_ALIGN));" >> "$BP_FILE"
-              echo "}" >> "$BP_FILE"
-              echo "#endif" >> "$BP_FILE"
-              echo "" >> "$BP_FILE"
-              
-              head -n $((INSERT_LINE - 1)) "$ETH_C" > /tmp/airoha_eth_modified.c
-              cat "$BP_FILE" >> /tmp/airoha_eth_modified.c
-              tail -n +$INSERT_LINE "$ETH_C" >> /tmp/airoha_eth_modified.c
-              mv /tmp/airoha_eth_modified.c "$ETH_C"
-              
-              echo "Backport added successfully"
-            fi
-          else
-            echo "WARNING: airoha_eth.c not found at $ETH_C"
-          fi
           
           echo "=== Stage 1: Multi-threaded fast compile ==="
           make -j$(nproc) || {
