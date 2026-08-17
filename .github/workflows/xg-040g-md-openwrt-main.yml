@@ -104,10 +104,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /mnt/openwrt/ccache
-          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v4-${{ github.run_id }}
+          key: ${{ runner.os }}-openwrt-ccache-common-v5-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v4-
-            ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v2-
+            ${{ runner.os }}-openwrt-ccache-common-v5-
+            ${{ runner.os }}-openwrt-ccache-common-v4-
 
       - name: Setup ccache
         run: |
@@ -449,7 +449,7 @@ jobs:
         if: always()
         with:
           path: /mnt/openwrt/ccache
-          key: ${{ runner.os }}-openwrt-${{ env.REPO_BRANCH }}-ccache-v4-${{ github.run_id }}
+          key: ${{ runner.os }}-openwrt-ccache-common-v5-${{ github.run_id }}
 
       - name: Prepare firmware artifacts path
         id: organize
