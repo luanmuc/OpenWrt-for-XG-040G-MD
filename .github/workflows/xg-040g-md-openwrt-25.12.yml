@@ -26,7 +26,7 @@ env:
   KEEP_RELEASES: 20
   KEEP_RELEASE_MARKER: "[keep-release]"
   CCACHE_DIR: /mnt/openwrt/ccache
-  CCACHE_MAXSIZE: 10G
+  CCACHE_MAXSIZE: 5G
   TZ: Asia/Shanghai
 
 jobs:
@@ -106,10 +106,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: /mnt/openwrt/ccache
-          key: ${{ runner.os }}-openwrt-ccache-common-v5-${{ github.run_id }}
+          key: ${{ runner.os }}-openwrt-25.12-ccache-v6-${{ github.run_id }}
           restore-keys: |
-            ${{ runner.os }}-openwrt-ccache-common-v5-
-            ${{ runner.os }}-openwrt-ccache-common-v4-
+            ${{ runner.os }}-openwrt-25.12-ccache-v6-
+            ${{ runner.os }}-openwrt-25.12-ccache-v5-
 
       - name: Setup ccache
         run: |
@@ -457,7 +457,7 @@ jobs:
         if: always()
         with:
           path: /mnt/openwrt/ccache
-          key: ${{ runner.os }}-openwrt-ccache-common-v5-${{ github.run_id }}
+          key: ${{ runner.os }}-openwrt-25.12-ccache-v6-${{ github.run_id }}
 
       - name: Prepare firmware artifacts path
         id: organize
