@@ -121,8 +121,6 @@ jobs:
       - name: Update & Install feeds
         working-directory: ./openwrt
         run: |
-          # 复制基础 feeds 配置
-          cp "$GITHUB_WORKSPACE/feeds.conf.default" feeds.conf.default
           # 更新所有 feed
           ./scripts/feeds update -a
           # 安装所有 feed 的包到 package/feeds/
