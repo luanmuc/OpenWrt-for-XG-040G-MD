@@ -80,11 +80,11 @@ jobs:
 
       - name: Clone OpenWrt source code (openwrt-main)
         run: |
-          # 锁定上游代码到2026-08-22版本（da5a0577f5），避开9月phylink PCS重构导致的网络故障
+          # 锁定上游代码到2026-08-31版本（be201e955），避开9月phylink PCS重构导致的网络故障
           # 需要足够的depth才能checkout到历史commit（当前最新到8月22日约497个commit）
           git clone --depth 600 --branch "$REPO_BRANCH" "$REPO_URL" openwrt
           cd openwrt
-          git checkout da5a0577f5b86cb11654303b82bb9f51c605a2ea
+          git checkout be201e955463956e6d65bb68b2956a99c8403655
           echo "上游代码已锁定到: $(git log --oneline -1)"
 
       - name: Move build dirs to /mnt/openwrt
